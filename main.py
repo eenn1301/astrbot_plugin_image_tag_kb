@@ -20,6 +20,9 @@ class ImageTagKBPlugin(Star):
         self.tag_to_images: Dict[str, List[str]] = {}
         self.image_dir: Optional[Path] = None
 
+        # 提前加载配置，避免 Web API 在 initialize 之前访问到 None
+        self._load_config()
+
         # 注册管理面板调用的 Web API
         context.register_web_api(
             f"/{PLUGIN_NAME}/upload", self.handle_upload, ["POST"], "上传图片"
@@ -36,20 +39,19 @@ class ImageTagKBPlugin(Star):
         context.register_web_api(
             f"/{PLUGIN_NAME}/rebuild", self.handle_rebuild, ["POST"], "重建标签"
         )
+        logger.info(f"[{PLUGIN_NAME}] Web API 已注册")
 
     # ==================== 生命周期 ====================
 
     async def initialize(self):
-        self._load_config()
         self._scan_images()
         logger.info(
-            f"[{PLUGIN_NAME}] 已就绪 | 标签数: {len(self.tag_to_images)}"
+            f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir} | 标签数: {len(self.tag_to_images)}"
         )
 
     def _load_config(self):
-        image_dir_str = self.config.get(
-            "image_dir", str(Path(__file__).parent / "data" / "images")
-        )
+        default_dir = str(Path(__file__).parent / "data" / "images")
+        image_dir_str = self.config.get("image_dir", default_dir)
         self.image_dir = Path(image_dir_str)
         if not self.image_dir.is_absolute():
             self.image_dir = Path(__file__).parent / image_dir_str
@@ -220,72 +222,103 @@ class ImageTagKBPlugin(Star):
 
     async def handle_upload(self):
         """接收管理面板上传的图片。"""
-        uploaded = await request.file("file")
-        if not uploaded:
-            return error_response("未收到文件")
+        try:
+            if not self.image_dir:
+                return error_response("插件未初始化")
 
-        filename = uploaded.filename
-        safe_name = Path(filename).name
-        exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
-        if Path(safe_name).suffix.lower() not in exts:
-            return error_response("不支持的文件类型")
+            uploaded = await request.file("file")
+            if not uploaded:
+                return error_response("未收到文件")
 
-        target = self.image_dir / safe_name
-        content = await uploaded.read()
-        with open(target, "wb") as f:
-            f.write(content)
+            filename = uploaded.filename
+            safe_name = Path(filename).name
+            exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+            if Path(safe_name).suffix.lower() not in exts:
+                return error_response("不支持的文件类型")
 
-        self._scan_images()
-        return json_response({"saved": safe_name})
+            target = self.image_dir / safe_name
+            content = await uploaded.read()
+            with open(target, "wb") as f:
+                f.write(content)
+
+            self._scan_images()
+            logger.info(f"[{PLUGIN_NAME}] 上传成功: {safe_name}")
+            return json_response({"saved": safe_name})
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] handle_upload 失败: {e}")
+            return error_response(f"上传失败: {e}")
 
     async def handle_list(self):
         """返回图片列表，包含文件名和 Base64 缩略图。"""
-        if not self.image_dir.exists():
-            return json_response({"files": []})
+        try:
+            if not self.image_dir or not self.image_dir.exists():
+                return json_response({"files": []})
 
-        files = sorted(p.name for p in self.image_dir.iterdir() if p.is_file())
-        result = []
-        for name in files:
-            file_path = self.image_dir / name
-            try:
-                raw = file_path.read_bytes()
-                if len(raw) > 2 * 1024 * 1024:
-                    thumb = None
-                else:
-                    b64 = base64.b64encode(raw).decode("utf-8")
-                    ext = file_path.suffix.lower()
-                    mime = {
-                        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                        ".png": "image/png", ".gif": "image/gif",
-                        ".bmp": "image/bmp", ".webp": "image/webp",
-                    }.get(ext, "image/jpeg")
-                    thumb = f"data:{mime};base64,{b64}"
-                result.append({"name": name, "thumb": thumb})
-            except Exception as e:
-                logger.error(f"读取图片失败 {name}: {e}")
-                result.append({"name": name, "thumb": None})
+            files = sorted(
+                p.name for p in self.image_dir.iterdir() if p.is_file()
+            )
+            result = []
+            for name in files:
+                file_path = self.image_dir / name
+                try:
+                    raw = file_path.read_bytes()
+                    if len(raw) > 2 * 1024 * 1024:
+                        thumb = None
+                    else:
+                        b64 = base64.b64encode(raw).decode("utf-8")
+                        ext = file_path.suffix.lower()
+                        mime = {
+                            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                            ".png": "image/png", ".gif": "image/gif",
+                            ".bmp": "image/bmp", ".webp": "image/webp",
+                        }.get(ext, "image/jpeg")
+                        thumb = f"data:{mime};base64,{b64}"
+                    result.append({"name": name, "thumb": thumb})
+                except Exception as e:
+                    logger.error(f"读取图片失败 {name}: {e}")
+                    result.append({"name": name, "thumb": None})
 
-        return json_response({"files": result})
+            return json_response({"files": result})
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] handle_list 失败: {e}")
+            return error_response(f"列出图片失败: {e}")
 
     async def handle_tags(self):
         """返回当前所有标签及其对应图片数量。"""
-        tags = []
-        for tag, paths in self.tag_to_images.items():
-            tags.append({"tag": tag, "count": len(paths)})
-        tags.sort(key=lambda x: x["tag"])
-        return json_response({"tags": tags})
+        try:
+            tags = [
+                {"tag": tag, "count": len(paths)}
+                for tag, paths in self.tag_to_images.items()
+            ]
+            tags.sort(key=lambda x: x["tag"])
+            return json_response({"tags": tags})
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] handle_tags 失败: {e}")
+            return error_response(f"列出标签失败: {e}")
 
     async def handle_delete(self):
-        payload = await request.json(default={})
-        filename = payload.get("filename", "")
-        safe_name = Path(filename).name
-        target = self.image_dir / safe_name
-        if not target.exists():
-            return error_response("文件不存在")
-        target.unlink()
-        self._scan_images()
-        return json_response({"deleted": safe_name})
+        try:
+            if not self.image_dir:
+                return error_response("插件未初始化")
+
+            payload = await request.json(default={})
+            filename = payload.get("filename", "")
+            safe_name = Path(filename).name
+            target = self.image_dir / safe_name
+            if not target.exists():
+                return error_response("文件不存在")
+            target.unlink()
+            self._scan_images()
+            logger.info(f"[{PLUGIN_NAME}] 已删除: {safe_name}")
+            return json_response({"deleted": safe_name})
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] handle_delete 失败: {e}")
+            return error_response(f"删除失败: {e}")
 
     async def handle_rebuild(self):
-        self._scan_images()
-        return json_response({"tag_count": len(self.tag_to_images)})
+        try:
+            self._scan_images()
+            return json_response({"tag_count": len(self.tag_to_images)})
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] handle_rebuild 失败: {e}")
+            return error_response(f"重建失败: {e}")

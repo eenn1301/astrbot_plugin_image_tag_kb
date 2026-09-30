@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import filter, AstrMessageEvent, MessageChain
+from astrbot.api.message_components import Image
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 
@@ -25,8 +26,6 @@ class ImageTagKBPlugin(Star):
         self.tag_to_image: Dict[str, str] = {}
         self.image_dir: Optional[Path] = None
         self.mapping_file: Optional[Path] = None
-        # 记录已经发送过图片的会话，避免重复追加
-        self._sent_sessions: set = set()
 
         self._load_config()
 
@@ -55,7 +54,13 @@ class ImageTagKBPlugin(Star):
     async def initialize(self):
         self._scan_images()
         logger.info(
-            f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir} | 图片数: {len(self.image_tags)}"
+            f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir}"
+        )
+        logger.info(
+            f"[{PLUGIN_NAME}] mapping 文件位置: {self.mapping_file}"
+        )
+        logger.info(
+            f"[{PLUGIN_NAME}] 当前图片数: {len(self.image_tags)}"
         )
 
     def _load_config(self):
@@ -67,8 +72,9 @@ class ImageTagKBPlugin(Star):
             self.image_dir = plugin_dir / image_dir_str
         self.image_dir.mkdir(parents=True, exist_ok=True)
 
-        self.mapping_file = plugin_dir / "data" / "mapping.json"
-        self.mapping_file.parent.mkdir(parents=True, exist_ok=True)
+        data_dir = plugin_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        self.mapping_file = data_dir / "mapping.json"
 
     # ==================== mapping.json ====================
 
@@ -143,10 +149,9 @@ class ImageTagKBPlugin(Star):
     # ==================== 官方消息发送后追加图片 ====================
 
     @filter.after_message_sent()
-    async def after_message_sent(self, event: AstrMessageEvent):
+    async def _hook_after_message_sent(self, event: AstrMessageEvent):
         """
-        官方消息已发送后触发。根据用户原始消息匹配图片，作为新消息追加发送。
-        不受流式输出影响。
+        官方消息发送后触发。注意：必须是普通协程，不能使用 yield。
         """
         if not self.config.get("enable_image", True):
             return
@@ -157,21 +162,25 @@ class ImageTagKBPlugin(Star):
 
         images = self._find_images(text)
         if not images:
+            logger.info(f"[{PLUGIN_NAME}] after_message_sent: 无匹配图片")
             return
 
         max_images = self.config.get("max_images", 1)
         selected = images[:max_images]
 
         logger.info(
-            f"[{PLUGIN_NAME}] after_message_sent 命中，准备追加 {len(selected)} 张图片"
+            f"[{PLUGIN_NAME}] after_message_sent: 命中 {len(selected)} 张图片，准备发送"
         )
 
         for img_path in selected:
             try:
                 logger.info(f"[{PLUGIN_NAME}] 发送图片: {img_path}")
-                yield event.image_result(img_path)
+                chain = MessageChain([Image.fromFileSystem(img_path)])
+                await self.context.send_message(event.unified_msg_origin, chain)
             except Exception as e:
-                logger.error(f"[{PLUGIN_NAME}] 发送图片失败 {img_path}: {e}")
+                logger.error(
+                    f"[{PLUGIN_NAME}] 发送图片失败 {img_path}: {e}", exc_info=True
+                )
 
     # ==================== 聊天指令 ====================
 
@@ -215,7 +224,8 @@ class ImageTagKBPlugin(Star):
             f"📊 图片标签知识库统计\n"
             f"图片目录：{self.image_dir}\n"
             f"标签总数：{total_tags}\n"
-            f"图片文件数：{unique_images}"
+            f"图片文件数：{unique_images}\n"
+            f"mapping 文件：{self.mapping_file}"
         )
         yield event.plain_result(msg)
 

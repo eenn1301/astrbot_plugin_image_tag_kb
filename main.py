@@ -53,15 +53,9 @@ class ImageTagKBPlugin(Star):
 
     async def initialize(self):
         self._scan_images()
-        logger.info(
-            f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir}"
-        )
-        logger.info(
-            f"[{PLUGIN_NAME}] mapping 文件位置: {self.mapping_file}"
-        )
-        logger.info(
-            f"[{PLUGIN_NAME}] 当前图片数: {len(self.image_tags)}"
-        )
+        logger.info(f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir}")
+        logger.info(f"[{PLUGIN_NAME}] mapping 文件位置: {self.mapping_file}")
+        logger.info(f"[{PLUGIN_NAME}] 当前图片数: {len(self.image_tags)}")
 
     def _load_config(self):
         plugin_dir = Path(__file__).parent
@@ -151,8 +145,10 @@ class ImageTagKBPlugin(Star):
     @filter.after_message_sent()
     async def _hook_after_message_sent(self, event: AstrMessageEvent):
         """
-        官方消息发送后触发。注意：必须是普通协程，不能使用 yield。
+        官方消息发送后触发。必须是普通协程，不能使用 yield。
         """
+        logger.info(f"[{PLUGIN_NAME}] after_message_sent 被触发")
+
         if not self.config.get("enable_image", True):
             return
 

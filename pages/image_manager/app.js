@@ -24,10 +24,7 @@ async function refreshList() {
   setStatus(imageGrid, '加载中…');
   imageCount.textContent = '';
   try {
-    console.log('[image_tag_kb] → 调用 list');
     const data = await bridge.apiGet('list');
-    console.log('[image_tag_kb] ← list 返回:', JSON.stringify(data).slice(0, 500));
-
     const files = data.files || [];
     imageCount.textContent = `（${files.length}）`;
     imageGrid.innerHTML = '';
@@ -36,9 +33,12 @@ async function refreshList() {
       setStatus(imageGrid, '暂无图片，请先上传。');
       return;
     }
+
     files.forEach(item => {
       const card = document.createElement('div');
       card.className = 'image-card';
+
+      // 缩略图
       const imgWrapper = document.createElement('div');
       imgWrapper.className = 'img-wrapper';
       if (item.thumb) {
@@ -50,10 +50,52 @@ async function refreshList() {
       } else {
         imgWrapper.innerHTML = '<span class="no-thumb">无法预览</span>';
       }
+
+      // 标签
+      const tagEl = document.createElement('div');
+      tagEl.className = 'tag-label';
+      tagEl.textContent = item.tag || '（无标签）';
+      tagEl.title = item.tag || '';
+
+      // 文件名（小字）
       const nameEl = document.createElement('div');
       nameEl.className = 'file-name';
       nameEl.textContent = item.name;
       nameEl.title = item.name;
+
+      // 按钮区
+      const actions = document.createElement('div');
+      actions.className = 'card-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'edit-btn';
+      editBtn.textContent = '改标签';
+      editBtn.addEventListener('click', async () => {
+        const currentTag = item.tag || '';
+        const input = prompt(`修改「${item.name}」的标签：`, currentTag);
+        if (input === null) return;
+        const newTag = input.trim();
+        if (!newTag) { showToast('标签不能为空', true); return; }
+        if (newTag === currentTag) return;
+
+        try {
+          const res = await bridge.apiPost('update_tag', {
+            filename: item.name,
+            tag: newTag,
+          });
+          if (res && res.error) {
+            showToast(res.error, true);
+            return;
+          }
+          showToast(`标签已更新为「${newTag}」`);
+          await refreshList();
+          await refreshTags();
+        } catch (e) {
+          console.error('[image_tag_kb] 改标签失败:', e);
+          showToast('修改失败: ' + (e.message || e), true);
+        }
+      });
+
       const delBtn = document.createElement('button');
       delBtn.className = 'del-btn';
       delBtn.textContent = '删除';
@@ -65,41 +107,46 @@ async function refreshList() {
           await refreshList();
           await refreshTags();
         } catch (e) {
+          console.error('[image_tag_kb] 删除失败:', e);
           showToast('删除失败: ' + (e.message || e), true);
         }
       });
+
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+
       card.appendChild(imgWrapper);
+      card.appendChild(tagEl);
       card.appendChild(nameEl);
-      card.appendChild(delBtn);
+      card.appendChild(actions);
       imageGrid.appendChild(card);
     });
   } catch (e) {
-    console.error('[image_tag_kb] ✗ refreshList 失败:', e);
+    console.error('[image_tag_kb] refreshList 失败:', e);
     setStatus(imageGrid, '加载图片列表失败：' + (e.message || e), true);
   }
 }
 
-// ==================== 加载标签统计 ====================
+// ==================== 加载标签 ====================
 async function refreshTags() {
   setStatus(tagStats, '加载中…');
   tagCount.textContent = '';
   try {
-    console.log('[image_tag_kb] → 调用 tags');
     const data = await bridge.apiGet('tags');
-    console.log('[image_tag_kb] ← tags 返回:', JSON.stringify(data).slice(0, 500));
-
     const tags = data.tags || [];
     tagCount.textContent = `（${tags.length}）`;
     tagStats.innerHTML = '';
+
     if (tags.length === 0) {
       setStatus(tagStats, '暂无标签，请先上传图片。');
       return;
     }
+
     tagStats.innerHTML = tags
-      .map(t => `<span class="tag-chip">${t.tag} <em>(${t.count})</em></span>`)
+      .map(t => `<span class="tag-chip" title="${t.filename}">${t.tag}</span>`)
       .join('');
   } catch (e) {
-    console.error('[image_tag_kb] ✗ refreshTags 失败:', e);
+    console.error('[image_tag_kb] refreshTags 失败:', e);
     setStatus(tagStats, '加载标签失败：' + (e.message || e), true);
   }
 }
@@ -107,6 +154,7 @@ async function refreshTags() {
 // ==================== 上传逻辑 ====================
 function bindUpload() {
   drop.addEventListener('click', () => fileInput.click());
+
   drop.addEventListener('dragover', e => {
     e.preventDefault();
     drop.classList.add('over');
@@ -117,6 +165,7 @@ function bindUpload() {
     drop.classList.remove('over');
     await uploadFiles(e.dataTransfer.files);
   });
+
   fileInput.addEventListener('change', async e => {
     await uploadFiles(e.target.files);
   });
@@ -135,13 +184,11 @@ async function uploadFiles(files) {
 
   for (const file of images) {
     try {
-      console.log('[image_tag_kb] → 上传:', file.name, file.type, file.size);
-      const res = await bridge.upload('upload', file);
-      console.log('[image_tag_kb] ← 上传返回:', res);
+      await bridge.upload('upload', file);
       ok++;
       textEl.textContent = `上传中… ${ok + fail}/${total}`;
     } catch (e) {
-      console.error('[image_tag_kb] ✗ 上传失败:', file.name, e);
+      console.error('[image_tag_kb] 上传失败:', file.name, e);
       fail++;
     }
   }
@@ -157,7 +204,6 @@ async function uploadFiles(files) {
     showToast(`成功 ${ok}，失败 ${fail}`, true);
   }
 
-  // 无论成功失败都刷新一次，方便排查
   await refreshList();
   await refreshTags();
 }
@@ -165,10 +211,9 @@ async function uploadFiles(files) {
 // ==================== 初始化 ====================
 (async () => {
   try {
-    const ctx = await bridge.ready();
-    console.log('[image_tag_kb] ✓ bridge ready, context =', ctx);
+    await bridge.ready();
   } catch (e) {
-    console.error('[image_tag_kb] ✗ bridge.ready 失败:', e);
+    console.error('[image_tag_kb] bridge.ready 失败:', e);
     setStatus(imageGrid, '页面初始化失败：' + (e.message || e), true);
     setStatus(tagStats, '页面初始化失败', true);
     return;
@@ -180,7 +225,6 @@ async function uploadFiles(files) {
     refreshTags();
   });
 
-  console.log('[image_tag_kb] → 首次加载 list/tags');
   await refreshList();
   await refreshTags();
 })();

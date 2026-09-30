@@ -1,4 +1,5 @@
 import base64
+import json
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -14,16 +15,18 @@ PLUGIN_NAME = "astrbot_plugin_image_tag_kb"
 class ImageTagKBPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
-        # 显式接收并保存配置对象
         self.config = config if config is not None else {}
 
-        self.tag_to_images: Dict[str, List[str]] = {}
-        self.image_dir: Optional[Path] = None
+        # 主要映射：文件名 -> 标签
+        self.image_tags: Dict[str, str] = {}
+        # 反查索引：标签 -> 图片完整路径
+        self.tag_to_image: Dict[str, str] = {}
 
-        # 提前加载配置，避免 Web API 在 initialize 之前访问到 None
+        self.image_dir: Optional[Path] = None
+        self.mapping_file: Optional[Path] = None
+
         self._load_config()
 
-        # 注册管理面板调用的 Web API
         context.register_web_api(
             f"/{PLUGIN_NAME}/upload", self.handle_upload, ["POST"], "上传图片"
         )
@@ -37,6 +40,9 @@ class ImageTagKBPlugin(Star):
             f"/{PLUGIN_NAME}/delete", self.handle_delete, ["POST"], "删除图片"
         )
         context.register_web_api(
+            f"/{PLUGIN_NAME}/update_tag", self.handle_update_tag, ["POST"], "修改标签"
+        )
+        context.register_web_api(
             f"/{PLUGIN_NAME}/rebuild", self.handle_rebuild, ["POST"], "重建标签"
         )
         logger.info(f"[{PLUGIN_NAME}] Web API 已注册")
@@ -46,7 +52,7 @@ class ImageTagKBPlugin(Star):
     async def initialize(self):
         self._scan_images()
         logger.info(
-            f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir} | 标签数: {len(self.tag_to_images)}"
+            f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir} | 图片数: {len(self.image_tags)}"
         )
 
     def _load_config(self):
@@ -57,78 +63,105 @@ class ImageTagKBPlugin(Star):
             self.image_dir = Path(__file__).parent / image_dir_str
         self.image_dir.mkdir(parents=True, exist_ok=True)
 
-    # ==================== 图片标签 ====================
+        self.mapping_file = Path(__file__).parent / "data" / "mapping.json"
+        self.mapping_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # ==================== 映射持久化 ====================
+
+    def _load_mapping(self) -> Dict[str, str]:
+        if not self.mapping_file or not self.mapping_file.exists():
+            return {}
+        try:
+            with open(self.mapping_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items()}
+        except Exception as e:
+            logger.error(f"读取 mapping.json 失败: {e}")
+        return {}
+
+    def _save_mapping(self):
+        if not self.mapping_file:
+            return
+        try:
+            with open(self.mapping_file, "w", encoding="utf-8") as f:
+                json.dump(self.image_tags, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"保存 mapping.json 失败: {e}")
+
+    # ==================== 扫描与索引 ====================
 
     def _scan_images(self):
-        """扫描图片目录，建立 标签 -> 图片路径 的映射。"""
-        self.tag_to_images.clear()
+        """扫描图片目录，读取/合并 mapping.json，重建标签索引。"""
         if not self.image_dir or not self.image_dir.exists():
+            self.image_tags = {}
+            self.tag_to_image = {}
             return
+
         exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
-        separators = self.config.get("tag_separators", ["_", "-", " "])
+        stored = self._load_mapping()
 
-        for img_path in self.image_dir.rglob("*"):
-            if img_path.suffix.lower() not in exts:
-                continue
-            stem = img_path.stem
-            self._add_tag(stem, str(img_path))
-            for sep in separators:
-                if sep in stem:
-                    parts = [p.strip() for p in stem.split(sep) if p.strip()]
-                    for part in parts:
-                        self._add_tag(part, str(img_path))
-                    break
+        # 当前目录下所有图片文件名
+        current_files = {
+            p.name
+            for p in self.image_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in exts
+        }
 
-    def _add_tag(self, tag: str, image_path: str):
-        tag = tag.lower()
-        self.tag_to_images.setdefault(tag, [])
-        if image_path not in self.tag_to_images[tag]:
-            self.tag_to_images[tag].append(image_path)
+        # 保留仍然存在的文件的标签
+        new_mapping: Dict[str, str] = {
+            name: tag for name, tag in stored.items() if name in current_files
+        }
+
+        # 新文件：用文件名 stem 作为默认标签
+        for name in current_files:
+            if name not in new_mapping:
+                new_mapping[name] = Path(name).stem.lower()
+
+        self.image_tags = new_mapping
+        self._rebuild_tag_index()
+        self._save_mapping()
+
+    def _rebuild_tag_index(self):
+        """根据 image_tags 重建 tag -> image_path 反查索引。"""
+        self.tag_to_image = {}
+        for filename, tag in self.image_tags.items():
+            path = self.image_dir / filename
+            self.tag_to_image[tag] = str(path)
 
     def _find_images(self, query: str) -> List[str]:
         q = query.lower().strip()
         if not q:
             return []
+        if q in self.tag_to_image:
+            return [self.tag_to_image[q]]
         results = []
-        if q in self.tag_to_images:
-            results.extend(self.tag_to_images[q])
-        else:
-            for tag, paths in self.tag_to_images.items():
-                if tag in q or q in tag:
-                    results.extend(paths)
-        seen, unique = set(), []
-        for p in results:
-            if p not in seen:
-                seen.add(p)
-                unique.append(p)
-        return unique
+        for tag, path in self.tag_to_image.items():
+            if tag in q or q in tag:
+                results.append(path)
+        return results
 
     # ==================== 知识库检索 ====================
 
     async def _find_knowledge(self, query: str) -> Optional[str]:
-        """从 AstrBot 内置知识库检索答案。"""
         q = query.strip()
         if not q:
             return None
-
         kb_name = self.config.get("kb_name", "")
         if not kb_name:
             logger.warning("未配置 kb_name，跳过知识库检索")
             return None
-
         try:
             kb_helper = await self.context.kb_manager.get_kb_by_name(kb_name)
             if not kb_helper:
                 logger.warning(f"未找到知识库: {kb_name}")
                 return None
-
             results = await kb_helper.retrieve(
                 query=q,
                 top_k=self.config.get("kb_top_k", 3),
             )
             if not results:
                 return None
-
             return "\n\n".join(r.text for r in results)
         except Exception as e:
             logger.error(f"知识库检索失败: {e}")
@@ -141,7 +174,6 @@ class ImageTagKBPlugin(Star):
         text = event.message_str.strip()
         if not text:
             return
-
         trigger_mode = self.config.get("trigger_mode", "all")
         if trigger_mode == "command":
             prefix = self.config.get("command_prefix", "/查")
@@ -169,18 +201,15 @@ class ImageTagKBPlugin(Star):
     async def cmd_rebuild(self, event: AstrMessageEvent):
         self._scan_images()
         yield event.plain_result(
-            f"标签索引已重建，共 {len(self.tag_to_images)} 个标签。"
+            f"标签索引已重建，共 {len(self.tag_to_image)} 个标签。"
         )
 
     @filter.command("查看标签")
     async def cmd_list_tags(self, event: AstrMessageEvent):
-        if not self.tag_to_images:
+        if not self.tag_to_image:
             yield event.plain_result("当前没有任何标签，请先上传图片。")
             return
-        lines = [
-            f"{tag}（{len(self.tag_to_images[tag])} 张）"
-            for tag in sorted(self.tag_to_images.keys())
-        ]
+        lines = sorted(self.tag_to_image.keys())
         max_show = 80
         msg = f"当前标签列表（共 {len(lines)} 个）：\n" + "\n".join(lines[:max_show])
         if len(lines) > max_show:
@@ -202,18 +231,14 @@ class ImageTagKBPlugin(Star):
 
     @filter.command("图片统计")
     async def cmd_stats(self, event: AstrMessageEvent):
-        total_tags = len(self.tag_to_images)
-        total_assoc = sum(len(v) for v in self.tag_to_images.values())
-        unique_images = set()
-        for paths in self.tag_to_images.values():
-            unique_images.update(paths)
+        total_tags = len(self.tag_to_image)
+        unique_images = len(self.image_tags)
         kb_name = self.config.get("kb_name", "")
         msg = (
             f"📊 图片标签知识库统计\n"
             f"图片目录：{self.image_dir}\n"
             f"标签总数：{total_tags}\n"
-            f"图片文件数：{len(unique_images)}\n"
-            f"标签-图片关联数：{total_assoc}\n"
+            f"图片文件数：{unique_images}\n"
             f"知识库：{kb_name or '（未配置）'}"
         )
         yield event.plain_result(msg)
@@ -226,7 +251,6 @@ class ImageTagKBPlugin(Star):
             if not self.image_dir:
                 return error_response("插件未初始化")
 
-            # AstrBot 4.27.5：使用 request.files() 获取上传文件字典
             files = await request.files()
             uploaded = files.get("file")
             if not uploaded:
@@ -251,7 +275,7 @@ class ImageTagKBPlugin(Star):
             return error_response(f"上传失败: {e}")
 
     async def handle_list(self):
-        """返回图片列表，包含文件名和 Base64 缩略图。"""
+        """返回图片列表，包含文件名、标签和 Base64 缩略图。"""
         try:
             if not self.image_dir or not self.image_dir.exists():
                 return json_response({"files": []})
@@ -262,6 +286,7 @@ class ImageTagKBPlugin(Star):
             result = []
             for name in files:
                 file_path = self.image_dir / name
+                tag = self.image_tags.get(name, "")
                 try:
                     raw = file_path.read_bytes()
                     if len(raw) > 2 * 1024 * 1024:
@@ -275,10 +300,10 @@ class ImageTagKBPlugin(Star):
                             ".bmp": "image/bmp", ".webp": "image/webp",
                         }.get(ext, "image/jpeg")
                         thumb = f"data:{mime};base64,{b64}"
-                    result.append({"name": name, "thumb": thumb})
+                    result.append({"name": name, "thumb": thumb, "tag": tag})
                 except Exception as e:
                     logger.error(f"读取图片失败 {name}: {e}")
-                    result.append({"name": name, "thumb": None})
+                    result.append({"name": name, "thumb": None, "tag": tag})
 
             return json_response({"files": result})
         except Exception as e:
@@ -286,11 +311,11 @@ class ImageTagKBPlugin(Star):
             return error_response(f"列出图片失败: {e}")
 
     async def handle_tags(self):
-        """返回当前所有标签及其对应图片数量。"""
+        """返回当前所有标签，附带对应图片文件名。"""
         try:
             tags = [
-                {"tag": tag, "count": len(paths)}
-                for tag, paths in self.tag_to_images.items()
+                {"tag": tag, "filename": Path(path).name}
+                for tag, path in self.tag_to_image.items()
             ]
             tags.sort(key=lambda x: x["tag"])
             return json_response({"tags": tags})
@@ -298,19 +323,64 @@ class ImageTagKBPlugin(Star):
             logger.error(f"[{PLUGIN_NAME}] handle_tags 失败: {e}")
             return error_response(f"列出标签失败: {e}")
 
+    async def handle_update_tag(self):
+        """修改某个图片的标签。"""
+        try:
+            payload = await request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                payload = {}
+
+            filename = str(payload.get("filename", "")).strip()
+            new_tag = str(payload.get("tag", "")).strip().lower()
+
+            if not filename:
+                return error_response("缺少文件名参数")
+            if not new_tag:
+                return error_response("标签不能为空")
+
+            safe_name = Path(filename).name
+            if safe_name not in self.image_tags:
+                return error_response("图片不存在")
+
+            # 检查标签是否被其他图片占用
+            for other_file, other_tag in self.image_tags.items():
+                if other_file != safe_name and other_tag == new_tag:
+                    return error_response(
+                        f"标签「{new_tag}」已被 {other_file} 使用"
+                    )
+
+            self.image_tags[safe_name] = new_tag
+            self._rebuild_tag_index()
+            self._save_mapping()
+            logger.info(f"[{PLUGIN_NAME}] 标签更新: {safe_name} -> {new_tag}")
+            return json_response({"filename": safe_name, "tag": new_tag})
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] handle_update_tag 失败: {e}")
+            return error_response(f"修改标签失败: {e}")
+
     async def handle_delete(self):
+        """删除指定图片。"""
         try:
             if not self.image_dir:
                 return error_response("插件未初始化")
 
-            payload = await request.json(default={})
+            payload = await request.get_json(silent=True)
+            if not isinstance(payload, dict):
+                payload = {}
+
             filename = payload.get("filename", "")
+            if not filename:
+                return error_response("缺少文件名参数")
+
             safe_name = Path(filename).name
             target = self.image_dir / safe_name
             if not target.exists():
                 return error_response("文件不存在")
+
             target.unlink()
-            self._scan_images()
+            self.image_tags.pop(safe_name, None)
+            self._rebuild_tag_index()
+            self._save_mapping()
             logger.info(f"[{PLUGIN_NAME}] 已删除: {safe_name}")
             return json_response({"deleted": safe_name})
         except Exception as e:
@@ -320,7 +390,7 @@ class ImageTagKBPlugin(Star):
     async def handle_rebuild(self):
         try:
             self._scan_images()
-            return json_response({"tag_count": len(self.tag_to_images)})
+            return json_response({"tag_count": len(self.tag_to_image)})
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] handle_rebuild 失败: {e}")
             return error_response(f"重建失败: {e}")

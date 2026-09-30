@@ -8,28 +8,16 @@ body {
 h2 { font-size: 20px; margin-bottom: 4px; }
 .hint { font-size: 13px; color: #888; margin-top: 0; }
 
-/* ===== 区块 ===== */
-.section {
-  margin-bottom: 28px;
-}
+.section { margin-bottom: 28px; }
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 10px;
 }
-.section-header h3 {
-  font-size: 15px;
-  margin: 0;
-  color: #444;
-}
-.section-header .count {
-  font-size: 12px;
-  color: #999;
-  font-weight: normal;
-}
+.section-header h3 { font-size: 15px; margin: 0; color: #444; }
+.section-header .count { font-size: 12px; color: #999; font-weight: normal; }
 
-/* ===== 按钮 ===== */
 .btn {
   padding: 5px 14px;
   border: 1px solid #d0d7de;
@@ -40,13 +28,8 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   cursor: pointer;
   transition: .15s;
 }
-.btn:hover {
-  background: #f5f7fa;
-  border-color: #4a90e2;
-  color: #2c6ecb;
-}
+.btn:hover { background: #f5f7fa; border-color: #4a90e2; color: #2c6ecb; }
 
-/* ===== 上传区域 ===== */
 .drop {
   border: 2px dashed #bbb;
   border-radius: 12px;
@@ -56,19 +39,10 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   transition: .2s;
   background: #fafafa;
 }
-.drop:hover, .drop.over {
-  border-color: #4a90e2;
-  background: #eef5ff;
-}
+.drop:hover, .drop.over { border-color: #4a90e2; background: #eef5ff; }
 .drop p { margin: 0; color: #666; }
 
-/* ===== 标签统计条 ===== */
-.tag-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 32px;
-}
+.tag-stats { display: flex; flex-wrap: wrap; gap: 8px; min-height: 32px; }
 .tag-chip {
   background: #eef5ff;
   color: #2c6ecb;
@@ -76,12 +50,10 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   border-radius: 20px;
   font-size: 13px;
 }
-.tag-chip em { font-style: normal; color: #888; }
 
-/* ===== 图片网格 ===== */
 .image-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 16px;
   min-height: 80px;
 }
@@ -95,9 +67,7 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   align-items: center;
   transition: box-shadow .15s;
 }
-.image-card:hover {
-  box-shadow: 0 4px 12px rgba(0,0,0,.08);
-}
+.image-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
 
 .img-wrapper {
   width: 100%;
@@ -109,16 +79,27 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   border-radius: 6px;
   background: #f5f5f5;
 }
-.img-wrapper img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
+.img-wrapper img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .no-thumb { font-size: 12px; color: #aaa; }
 
-.file-name {
+.tag-label {
   margin-top: 8px;
   font-size: 13px;
+  font-weight: 600;
+  color: #2c6ecb;
+  background: #eef5ff;
+  padding: 3px 10px;
+  border-radius: 12px;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-name {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #999;
   word-break: break-all;
   text-align: center;
   line-height: 1.3;
@@ -126,19 +107,30 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   overflow: hidden;
 }
 
-.del-btn {
+.card-actions {
+  display: flex;
+  gap: 6px;
   margin-top: 8px;
-  padding: 4px 14px;
+}
+
+.edit-btn, .del-btn {
+  padding: 4px 12px;
   border: none;
   border-radius: 6px;
-  background: #fde8e8;
-  color: #d33;
   cursor: pointer;
   font-size: 12px;
 }
+.edit-btn {
+  background: #eef5ff;
+  color: #2c6ecb;
+}
+.edit-btn:hover { background: #dbe9ff; }
+.del-btn {
+  background: #fde8e8;
+  color: #d33;
+}
 .del-btn:hover { background: #fbd5d5; }
 
-/* ===== 状态提示 ===== */
 .status {
   grid-column: 1 / -1;
   text-align: center;
@@ -147,11 +139,8 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   font-size: 13px;
   width: 100%;
 }
-.status.error {
-  color: #d33;
-}
+.status.error { color: #d33; }
 
-/* ===== Toast ===== */
 .toast {
   position: fixed;
   left: 50%;
@@ -167,10 +156,5 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   transition: .25s;
   z-index: 9999;
 }
-.toast.show {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-.toast.error {
-  background: #d33;
-}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+.toast.error { background: #d33; }

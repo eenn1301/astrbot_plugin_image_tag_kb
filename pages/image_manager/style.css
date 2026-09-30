@@ -29,6 +29,12 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   transition: .15s;
 }
 .btn:hover { background: #f5f7fa; border-color: #4a90e2; color: #2c6ecb; }
+.btn.primary {
+  background: #4a90e2;
+  border-color: #4a90e2;
+  color: #fff;
+}
+.btn.primary:hover { background: #3b7dd8; border-color: #3b7dd8; color: #fff; }
 
 .drop {
   border: 2px dashed #bbb;
@@ -120,15 +126,9 @@ h2 { font-size: 20px; margin-bottom: 4px; }
   cursor: pointer;
   font-size: 12px;
 }
-.edit-btn {
-  background: #eef5ff;
-  color: #2c6ecb;
-}
+.edit-btn { background: #eef5ff; color: #2c6ecb; }
 .edit-btn:hover { background: #dbe9ff; }
-.del-btn {
-  background: #fde8e8;
-  color: #d33;
-}
+.del-btn { background: #fde8e8; color: #d33; }
 .del-btn:hover { background: #fbd5d5; }
 
 .status {
@@ -158,3 +158,60 @@ h2 { font-size: 20px; margin-bottom: 4px; }
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.error { background: #d33; }
+
+/* ===== 自定义弹窗 ===== */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .4);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+.modal-mask.show { display: flex; }
+
+.modal-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: min(400px, 88vw);
+  box-shadow: 0 12px 40px rgba(0,0,0,.2);
+  animation: pop .18s ease-out;
+}
+@keyframes pop {
+  from { transform: scale(.95); opacity: .6; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.modal-box h4 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #222;
+}
+.modal-box p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.modal-box input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+  transition: .15s;
+  margin-bottom: 14px;
+}
+.modal-box input:focus {
+  border-color: #4a90e2;
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, .15);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

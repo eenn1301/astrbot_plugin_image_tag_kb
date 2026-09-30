@@ -38,6 +38,19 @@
     </div>
   </section>
 
+  <!-- 自定义弹窗（替代原生 confirm/prompt） -->
+  <div class="modal-mask" id="modalMask">
+    <div class="modal-box">
+      <h4 id="modalTitle">标题</h4>
+      <p id="modalMsg"></p>
+      <input type="text" id="modalInput" />
+      <div class="modal-actions">
+        <button class="btn" id="modalCancel">取消</button>
+        <button class="btn primary" id="modalOk">确定</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script type="module" src="./app.js"></script>

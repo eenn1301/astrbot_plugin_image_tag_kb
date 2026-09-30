@@ -9,6 +9,15 @@ const imageCount = document.getElementById('imageCount');
 const refreshBtn = document.getElementById('refreshBtn');
 const toast = document.getElementById('toast');
 
+// 自定义弹窗元素
+const modalMask = document.getElementById('modalMask');
+const modalTitle = document.getElementById('modalTitle');
+const modalMsg = document.getElementById('modalMsg');
+const modalInput = document.getElementById('modalInput');
+const modalCancel = document.getElementById('modalCancel');
+const modalOk = document.getElementById('modalOk');
+
+// ==================== 工具函数 ====================
 function showToast(msg, isError = false) {
   toast.textContent = msg;
   toast.className = 'toast show' + (isError ? ' error' : '');
@@ -17,6 +26,73 @@ function showToast(msg, isError = false) {
 
 function setStatus(el, text, isError = false) {
   el.innerHTML = `<p class="status${isError ? ' error' : ''}">${text}</p>`;
+}
+
+/**
+ * 自定义弹窗。options:
+ *   title: 标题
+ *   message: 描述文本
+ *   defaultValue: 输入框默认值（若为 null 则不显示输入框）
+ *   inputPlaceholder: 输入框占位
+ * 返回：字符串（输入框内容）或 true（确认）或 null（取消）
+ */
+function openModal({ title, message = '', defaultValue = null, inputPlaceholder = '' }) {
+  return new Promise(resolve => {
+    modalTitle.textContent = title;
+
+    if (message) {
+      modalMsg.textContent = message;
+      modalMsg.style.display = 'block';
+    } else {
+      modalMsg.style.display = 'none';
+    }
+
+    if (defaultValue === null) {
+      modalInput.style.display = 'none';
+      modalInput.value = '';
+    } else {
+      modalInput.style.display = 'block';
+      modalInput.value = defaultValue;
+      modalInput.placeholder = inputPlaceholder;
+    }
+
+    modalMask.classList.add('show');
+
+    const cleanup = () => {
+      modalMask.classList.remove('show');
+      modalOk.removeEventListener('click', onOk);
+      modalCancel.removeEventListener('click', onCancel);
+      modalMask.removeEventListener('click', onMask);
+      modalInput.removeEventListener('keydown', onKey);
+    };
+
+    const onOk = () => {
+      const val = defaultValue === null ? true : modalInput.value;
+      cleanup();
+      resolve(val);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve(null);
+    };
+
+    const onMask = (e) => {
+      if (e.target === modalMask) onCancel();
+    };
+
+    const onKey = (e) => {
+      if (e.key === 'Enter') onOk();
+      if (e.key === 'Escape') onCancel();
+    };
+
+    modalOk.addEventListener('click', onOk);
+    modalCancel.addEventListener('click', onCancel);
+    modalMask.addEventListener('click', onMask);
+    modalInput.addEventListener('keydown', onKey);
+
+    setTimeout(() => modalInput.focus(), 50);
+  });
 }
 
 // ==================== 加载图片列表 ====================
@@ -38,7 +114,6 @@ async function refreshList() {
       const card = document.createElement('div');
       card.className = 'image-card';
 
-      // 缩略图
       const imgWrapper = document.createElement('div');
       imgWrapper.className = 'img-wrapper';
       if (item.thumb) {
@@ -51,43 +126,48 @@ async function refreshList() {
         imgWrapper.innerHTML = '<span class="no-thumb">无法预览</span>';
       }
 
-      // 标签
       const tagEl = document.createElement('div');
       tagEl.className = 'tag-label';
       tagEl.textContent = item.tag || '（无标签）';
       tagEl.title = item.tag || '';
 
-      // 文件名（小字）
       const nameEl = document.createElement('div');
       nameEl.className = 'file-name';
       nameEl.textContent = item.name;
       nameEl.title = item.name;
 
-      // 按钮区
       const actions = document.createElement('div');
       actions.className = 'card-actions';
 
+      // ---- 改标签按钮 ----
       const editBtn = document.createElement('button');
       editBtn.className = 'edit-btn';
       editBtn.textContent = '改标签';
       editBtn.addEventListener('click', async () => {
         const currentTag = item.tag || '';
-        const input = prompt(`修改「${item.name}」的标签：`, currentTag);
-        if (input === null) return;
-        const newTag = input.trim();
-        if (!newTag) { showToast('标签不能为空', true); return; }
-        if (newTag === currentTag) return;
+        const newTag = await openModal({
+          title: '修改标签',
+          message: `文件：${item.name}`,
+          defaultValue: currentTag,
+          inputPlaceholder: '输入新标签',
+        });
+        if (newTag === null) return;           // 取消
+        const trimmed = String(newTag).trim();
+        if (!trimmed) { showToast('标签不能为空', true); return; }
+        if (trimmed === currentTag) return;
 
         try {
+          console.log('[image_tag_kb] → update_tag', item.name, '->', trimmed);
           const res = await bridge.apiPost('update_tag', {
             filename: item.name,
-            tag: newTag,
+            tag: trimmed,
           });
+          console.log('[image_tag_kb] ← update_tag 返回:', res);
           if (res && res.error) {
             showToast(res.error, true);
             return;
           }
-          showToast(`标签已更新为「${newTag}」`);
+          showToast(`标签已更新为「${trimmed}」`);
           await refreshList();
           await refreshTags();
         } catch (e) {
@@ -96,13 +176,25 @@ async function refreshList() {
         }
       });
 
+      // ---- 删除按钮 ----
       const delBtn = document.createElement('button');
       delBtn.className = 'del-btn';
       delBtn.textContent = '删除';
       delBtn.addEventListener('click', async () => {
-        if (!confirm(`确定删除「${item.name}」？`)) return;
+        const ok = await openModal({
+          title: '删除图片',
+          message: `确定删除「${item.name}」？此操作不可恢复。`,
+        });
+        if (ok === null) return;
+
         try {
-          await bridge.apiPost('delete', { filename: item.name });
+          console.log('[image_tag_kb] → delete', item.name);
+          const res = await bridge.apiPost('delete', { filename: item.name });
+          console.log('[image_tag_kb] ← delete 返回:', res);
+          if (res && res.error) {
+            showToast(res.error, true);
+            return;
+          }
           showToast(`已删除 ${item.name}`);
           await refreshList();
           await refreshTags();

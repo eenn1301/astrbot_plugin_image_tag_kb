@@ -4,28 +4,13 @@
     "type": "string",
     "default": "data/images"
   },
-  "trigger_mode": {
-    "description": "触发模式：all（所有消息）或 command（需指令前缀）",
-    "type": "string",
-    "default": "all"
-  },
-  "command_prefix": {
-    "description": "指令模式下的前缀",
-    "type": "string",
-    "default": "/查"
-  },
-  "enable_kb": {
-    "description": "是否发送官方 LLM 的回答",
-    "type": "bool",
-    "default": true
-  },
   "enable_image": {
-    "description": "是否发送匹配的图片",
+    "description": "是否在官方回复后追加匹配的图片",
     "type": "bool",
     "default": true
   },
   "max_images": {
-    "description": "最多发送几张图片",
+    "description": "最多追加几张图片",
     "type": "int",
     "default": 1
   }

@@ -1,12 +1,12 @@
-import json
+import base64
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
-from astrbot.api import logger
-from astrbot.api import AstrBotConfig
+
 
 PLUGIN_NAME = "astrbot_plugin_image_tag_kb"
 
@@ -26,6 +26,9 @@ class ImageTagKBPlugin(Star):
         )
         context.register_web_api(
             f"/{PLUGIN_NAME}/list", self.handle_list, ["GET"], "列出图片"
+        )
+        context.register_web_api(
+            f"/{PLUGIN_NAME}/tags", self.handle_tags, ["GET"], "列出标签"
         )
         context.register_web_api(
             f"/{PLUGIN_NAME}/delete", self.handle_delete, ["POST"], "删除图片"
@@ -66,9 +69,7 @@ class ImageTagKBPlugin(Star):
             if img_path.suffix.lower() not in exts:
                 continue
             stem = img_path.stem
-            # 完整文件名作为一个标签
             self._add_tag(stem, str(img_path))
-            # 按分隔符拆分出子标签
             for sep in separators:
                 if sep in stem:
                     parts = [p.strip() for p in stem.split(sep) if p.strip()]
@@ -169,6 +170,52 @@ class ImageTagKBPlugin(Star):
             f"标签索引已重建，共 {len(self.tag_to_images)} 个标签。"
         )
 
+    @filter.command("查看标签")
+    async def cmd_list_tags(self, event: AstrMessageEvent):
+        if not self.tag_to_images:
+            yield event.plain_result("当前没有任何标签，请先上传图片。")
+            return
+        lines = [
+            f"{tag}（{len(self.tag_to_images[tag])} 张）"
+            for tag in sorted(self.tag_to_images.keys())
+        ]
+        max_show = 80
+        msg = f"当前标签列表（共 {len(lines)} 个）：\n" + "\n".join(lines[:max_show])
+        if len(lines) > max_show:
+            msg += f"\n…… 仅显示前 {max_show} 个"
+        yield event.plain_result(msg)
+
+    @filter.command("查看图片")
+    async def cmd_list_images(self, event: AstrMessageEvent, tag: str = ""):
+        if not tag:
+            yield event.plain_result("用法：/查看图片 标签名")
+            return
+        images = self._find_images(tag)
+        if not images:
+            yield event.plain_result(f"没有找到与「{tag}」匹配的图片。")
+            return
+        lines = [Path(p).name for p in images]
+        msg = f"「{tag}」匹配到 {len(lines)} 张图片：\n" + "\n".join(lines)
+        yield event.plain_result(msg)
+
+    @filter.command("图片统计")
+    async def cmd_stats(self, event: AstrMessageEvent):
+        total_tags = len(self.tag_to_images)
+        total_assoc = sum(len(v) for v in self.tag_to_images.values())
+        unique_images = set()
+        for paths in self.tag_to_images.values():
+            unique_images.update(paths)
+        kb_name = self.config.get("kb_name", "")
+        msg = (
+            f"📊 图片标签知识库统计\n"
+            f"图片目录：{self.image_dir}\n"
+            f"标签总数：{total_tags}\n"
+            f"图片文件数：{len(unique_images)}\n"
+            f"标签-图片关联数：{total_assoc}\n"
+            f"知识库：{kb_name or '（未配置）'}"
+        )
+        yield event.plain_result(msg)
+
     # ==================== Web API ====================
 
     async def handle_upload(self):
@@ -178,7 +225,7 @@ class ImageTagKBPlugin(Star):
             return error_response("未收到文件")
 
         filename = uploaded.filename
-        safe_name = Path(filename).name  # 防止目录穿越
+        safe_name = Path(filename).name
         exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
         if Path(safe_name).suffix.lower() not in exts:
             return error_response("不支持的文件类型")
@@ -192,10 +239,41 @@ class ImageTagKBPlugin(Star):
         return json_response({"saved": safe_name})
 
     async def handle_list(self):
+        """返回图片列表，包含文件名和 Base64 缩略图。"""
         if not self.image_dir.exists():
             return json_response({"files": []})
+
         files = sorted(p.name for p in self.image_dir.iterdir() if p.is_file())
-        return json_response({"files": files})
+        result = []
+        for name in files:
+            file_path = self.image_dir / name
+            try:
+                raw = file_path.read_bytes()
+                if len(raw) > 2 * 1024 * 1024:
+                    thumb = None
+                else:
+                    b64 = base64.b64encode(raw).decode("utf-8")
+                    ext = file_path.suffix.lower()
+                    mime = {
+                        ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                        ".png": "image/png", ".gif": "image/gif",
+                        ".bmp": "image/bmp", ".webp": "image/webp",
+                    }.get(ext, "image/jpeg")
+                    thumb = f"data:{mime};base64,{b64}"
+                result.append({"name": name, "thumb": thumb})
+            except Exception as e:
+                logger.error(f"读取图片失败 {name}: {e}")
+                result.append({"name": name, "thumb": None})
+
+        return json_response({"files": result})
+
+    async def handle_tags(self):
+        """返回当前所有标签及其对应图片数量。"""
+        tags = []
+        for tag, paths in self.tag_to_images.items():
+            tags.append({"tag": tag, "count": len(paths)})
+        tags.sort(key=lambda x: x["tag"])
+        return json_response({"tags": tags})
 
     async def handle_delete(self):
         payload = await request.json(default={})

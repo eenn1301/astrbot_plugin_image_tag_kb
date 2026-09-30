@@ -6,14 +6,17 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 from astrbot.api import logger
-
+from astrbot.api import AstrBotConfig
 
 PLUGIN_NAME = "astrbot_plugin_image_tag_kb"
 
 
 class ImageTagKBPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
+        # 显式接收并保存配置对象
+        self.config = config if config is not None else {}
+
         self.tag_to_images: Dict[str, List[str]] = {}
         self.image_dir: Optional[Path] = None
 

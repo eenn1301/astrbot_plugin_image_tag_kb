@@ -8,15 +8,12 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 
-
 PLUGIN_NAME = "astrbot_plugin_image_tag_kb"
-
 
 class ImageTagKBPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
 
-        # 兼容不同版本的配置注入
         if config:
             self.config = config
         else:
@@ -29,7 +26,6 @@ class ImageTagKBPlugin(Star):
         self.settings_file: Optional[Path] = None
 
         self._load_config()
-        # 读取运行时可变更的设置（覆盖 config 里的 kb_name）
         self.settings: Dict[str, Any] = self._load_settings()
 
         context.register_web_api(
@@ -58,8 +54,6 @@ class ImageTagKBPlugin(Star):
         )
         logger.info(f"[{PLUGIN_NAME}] Web API 已注册")
 
-    # ==================== 生命周期 ====================
-
     async def initialize(self):
         self._scan_images()
         logger.info(
@@ -81,8 +75,6 @@ class ImageTagKBPlugin(Star):
         self.mapping_file = plugin_dir / "data" / "mapping.json"
         self.mapping_file.parent.mkdir(parents=True, exist_ok=True)
         self.settings_file = plugin_dir / "data" / "settings.json"
-
-    # ==================== settings.json ====================
 
     def _load_settings(self) -> Dict[str, Any]:
         if not self.settings_file or not self.settings_file.exists():
@@ -106,13 +98,10 @@ class ImageTagKBPlugin(Star):
             logger.error(f"保存 settings.json 失败: {e}")
 
     def _current_kb_name(self) -> str:
-        """优先用 settings 里的值，其次用 config 里的。"""
         kb_name = self.settings.get("kb_name", "")
         if not kb_name:
             kb_name = self.config.get("kb_name", "")
         return str(kb_name).strip() if kb_name else ""
-
-    # ==================== mapping.json ====================
 
     def _load_mapping(self) -> Dict[str, str]:
         if not self.mapping_file or not self.mapping_file.exists():
@@ -134,8 +123,6 @@ class ImageTagKBPlugin(Star):
                 json.dump(self.image_tags, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"保存 mapping.json 失败: {e}")
-
-    # ==================== 扫描与索引 ====================
 
     def _scan_images(self):
         if not self.image_dir or not self.image_dir.exists():
@@ -182,8 +169,6 @@ class ImageTagKBPlugin(Star):
                 results.append(path)
         return results
 
-    # ==================== 知识库检索 ====================
-
     @staticmethod
     def _extract_text(item: Any) -> str:
         if item is None:
@@ -202,6 +187,7 @@ class ImageTagKBPlugin(Star):
         return str(item)
 
     async def _find_knowledge(self, query: str) -> Optional[str]:
+        """从 AstrBot 内置知识库检索答案。"""
         q = query.strip()
         if not q:
             return None
@@ -217,24 +203,13 @@ class ImageTagKBPlugin(Star):
             return None
 
         try:
-            kb_helper = await kb_manager.get_kb_by_name(kb_name)
-        except Exception as e:
-            logger.error(f"[{PLUGIN_NAME}] get_kb_by_name 异常: {e}", exc_info=True)
-            return None
-
-        if not kb_helper:
-            logger.warning(f"[{PLUGIN_NAME}] 未找到知识库「{kb_name}」")
-            return None
-
-        top_k = int(self.settings.get("kb_top_k") or self.config.get("kb_top_k", 3))
-        results = None
-        try:
-            results = await kb_helper.retrieve(query=q, top_k=top_k)
-        except TypeError:
-            try:
-                results = await kb_helper.retrieve(q, top_k)
-            except TypeError:
-                results = await kb_helper.retrieve(q)
+            # 修正：通过 kb_manager.retrieve 进行检索
+            logger.info(f"[{PLUGIN_NAME}] 正在通过 kb_manager 检索: {kb_name}")
+            results = await kb_manager.retrieve(
+                query=q,
+                kb_names=[kb_name],
+                top_k=int(self.settings.get("kb_top_k") or self.config.get("kb_top_k", 3)),
+            )
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] 知识库检索异常: {e}", exc_info=True)
             return None
@@ -244,10 +219,10 @@ class ImageTagKBPlugin(Star):
             return None
 
         docs = results
-        if hasattr(results, "docs"):
-            docs = results.docs
-        elif isinstance(results, dict) and "docs" in results:
-            docs = results["docs"]
+        if isinstance(results, dict) and "results" in results:
+            docs = results["results"]
+        elif hasattr(results, "results"):
+            docs = results.results
 
         try:
             docs = list(docs)
@@ -263,8 +238,6 @@ class ImageTagKBPlugin(Star):
         if not texts:
             return None
         return "\n\n".join(texts)
-
-    # ==================== 消息处理 ====================
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
     async def on_message(self, event: AstrMessageEvent):
@@ -297,8 +270,6 @@ class ImageTagKBPlugin(Star):
             max_images = self.config.get("max_images", 1)
             for img_path in images[:max_images]:
                 yield event.image_result(img_path)
-
-    # ==================== 聊天指令 ====================
 
     @filter.command("重建标签")
     async def cmd_rebuild(self, event: AstrMessageEvent):
@@ -345,8 +316,6 @@ class ImageTagKBPlugin(Star):
             f"知识库：{kb_name or '（未选择）'}"
         )
         yield event.plain_result(msg)
-
-    # ==================== Web API ====================
 
     async def handle_upload(self):
         try:
@@ -492,17 +461,13 @@ class ImageTagKBPlugin(Star):
             logger.error(f"[{PLUGIN_NAME}] handle_rebuild 失败: {e}")
             return error_response(f"重建失败: {e}")
 
-    # ==================== 知识库列表 / 选择 ====================
-
     async def _list_kb_names(self) -> List[str]:
-        """从 kb_manager 里尽量把所有知识库名字列出来。"""
         kb_manager = getattr(self.context, "kb_manager", None)
         if kb_manager is None:
             return []
 
         names: List[str] = []
 
-        # 方法 1：get_all_kbs()
         method = getattr(kb_manager, "get_all_kbs", None)
         if callable(method):
             try:
@@ -516,7 +481,6 @@ class ImageTagKBPlugin(Star):
             except Exception as e:
                 logger.warning(f"[{PLUGIN_NAME}] get_all_kbs 失败: {e}")
 
-        # 方法 2：其他可能的方法名
         if not names:
             for method_name in ("list_kbs", "get_kbs", "all_kbs"):
                 m = getattr(kb_manager, method_name, None)
@@ -534,7 +498,6 @@ class ImageTagKBPlugin(Star):
                     except Exception:
                         pass
 
-        # 方法 3：直接读属性
         if not names:
             for attr in ("kbs", "knowledge_bases", "_kbs", "kb_list", "_kb_list"):
                 val = getattr(kb_manager, attr, None)
@@ -552,7 +515,6 @@ class ImageTagKBPlugin(Star):
         return sorted(set(n for n in names if n))
 
     async def handle_list_kbs(self):
-        """返回所有知识库名称 + 当前选择。"""
         try:
             names = await self._list_kb_names()
             logger.info(f"[{PLUGIN_NAME}] 可用知识库: {names}")
@@ -565,7 +527,6 @@ class ImageTagKBPlugin(Star):
             return error_response(f"列出知识库失败: {e}")
 
     async def handle_set_kb(self):
-        """保存用户选择的知识库。"""
         try:
             payload = await request.json(default={})
             if not isinstance(payload, dict):

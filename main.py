@@ -26,6 +26,8 @@ class ImageTagKBPlugin(Star):
         self.tag_to_image: Dict[str, str] = {}
         self.image_dir: Optional[Path] = None
         self.mapping_file: Optional[Path] = None
+        # 防止同一会话短时间内重复发图
+        self._sent_keys: set = set()
 
         self._load_config()
 
@@ -140,14 +142,15 @@ class ImageTagKBPlugin(Star):
                 results.append(path)
         return results
 
-    # ==================== 官方消息发送后追加图片 ====================
+    # ==================== LLM 响应后追加图片 ====================
 
-    @filter.after_message_sent()
-    async def _hook_after_message_sent(self, event: AstrMessageEvent):
+    @filter.on_llm_response()
+    async def _hook_on_llm_response(self, event: AstrMessageEvent, resp):
         """
-        官方消息发送后触发。必须是普通协程，不能使用 yield。
+        LLM 响应生成后触发。在流式输出下仍然会触发。
+        直接通过 context.send_message 发送图片作为独立消息。
         """
-        logger.info(f"[{PLUGIN_NAME}] after_message_sent 被触发")
+        logger.info(f"[{PLUGIN_NAME}] on_llm_response 被触发")
 
         if not self.config.get("enable_image", True):
             return
@@ -158,21 +161,23 @@ class ImageTagKBPlugin(Star):
 
         images = self._find_images(text)
         if not images:
-            logger.info(f"[{PLUGIN_NAME}] after_message_sent: 无匹配图片")
+            logger.info(f"[{PLUGIN_NAME}] on_llm_response: 无匹配图片")
             return
 
         max_images = self.config.get("max_images", 1)
         selected = images[:max_images]
 
         logger.info(
-            f"[{PLUGIN_NAME}] after_message_sent: 命中 {len(selected)} 张图片，准备发送"
+            f"[{PLUGIN_NAME}] on_llm_response: 命中 {len(selected)} 张图片，准备发送"
         )
 
         for img_path in selected:
             try:
                 logger.info(f"[{PLUGIN_NAME}] 发送图片: {img_path}")
                 chain = MessageChain([Image.fromFileSystem(img_path)])
-                await self.context.send_message(event.unified_msg_origin, chain)
+                await self.context.send_message(
+                    event.unified_msg_origin, chain
+                )
             except Exception as e:
                 logger.error(
                     f"[{PLUGIN_NAME}] 发送图片失败 {img_path}: {e}", exc_info=True

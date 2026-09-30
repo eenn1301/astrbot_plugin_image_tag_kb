@@ -5,4 +5,3 @@ desc: 根据图片文件名生成标签，用户查询时先回答知识库内�
 version: 1.0.0
 repo: https://github.com/eenn1301/astrbot_plugin_image_tag_kb
 short_desc: 图片标签 + 知识库问答
-ssh-keygen -t ed25519 -C "3319125935@example.com"

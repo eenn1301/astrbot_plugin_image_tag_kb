@@ -5,9 +5,10 @@
     "default": "data/images"
   },
   "kb_name": {
-    "description": "AstrBot 知识库名称（在面板知识库页面创建）",
+    "description": "（已被插件页面上的「知识库选择」取代，此处可忽略）",
     "type": "string",
-    "default": ""
+    "default": "",
+    "invisible": true
   },
   "kb_top_k": {
     "description": "知识库检索返回的文档片段数量",
@@ -25,9 +26,10 @@
     "default": "/查"
   },
   "tag_separators": {
-    "description": "文件名中的标签分隔符列表",
+    "description": "（一对一模式下已不生效）",
     "type": "list",
-    "default": ["_", "-", " "]
+    "default": ["_", "-", " "],
+    "invisible": true
   },
   "enable_kb": {
     "description": "是否启用知识库回答",

@@ -226,7 +226,9 @@ class ImageTagKBPlugin(Star):
             if not self.image_dir:
                 return error_response("插件未初始化")
 
-            uploaded = await request.file("file")
+            # AstrBot 4.27.5：使用 request.files() 获取上传文件字典
+            files = await request.files()
+            uploaded = files.get("file")
             if not uploaded:
                 return error_response("未收到文件")
 

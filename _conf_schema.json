@@ -5,13 +5,18 @@
     "default": "data/images"
   },
   "enable_image": {
-    "description": "是否在官方回复后追加匹配的图片",
+    "description": "是否匹配图片并追加发送",
     "type": "bool",
     "default": true
   },
   "max_images": {
-    "description": "最多追加几张图片",
+    "description": "最多发送几张图片",
     "type": "int",
     "default": 1
+  },
+  "image_delay_seconds": {
+    "description": "延迟多少秒后发送图片（给官方 LLM 留出回复时间）",
+    "type": "float",
+    "default": 3.0
   }
 }

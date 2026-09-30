@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.message_components import Image, Plain
+from astrbot.api.message_components import Image
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 
@@ -139,15 +139,18 @@ class ImageTagKBPlugin(Star):
                 results.append(path)
         return results
 
-    # ==================== 消息处理：在官方回复后追加图片 ====================
+    # ==================== 在官方回复后追加图片 ====================
 
     @filter.on_decorating_result(priority=100)
     async def on_decorating_result(self, event: AstrMessageEvent):
         """
-        在官方 LLM 生成回复之后、消息发送之前触发。
-        根据用户原始消息匹配图片，并追加到消息链末尾。
+        官方管道生成回复后触发。根据用户原始消息匹配图片，追加到消息链末尾。
         """
-        # 获取原始用户消息
+        # 只在启用时处理
+        if not self.config.get("enable_image", True):
+            return
+
+        # 用户原始消息
         text = event.message_str.strip()
         if not text:
             return
@@ -157,30 +160,27 @@ class ImageTagKBPlugin(Star):
         if not images:
             return
 
-        # 检查是否启用图片发送
-        if not self.config.get("enable_image", True):
-            return
-
-        # 获取当前的消息链
+        # 拿到官方即将发送的结果
         result = event.get_result()
         if result is None:
             return
 
-        chain = result.chain
-        if chain is None:
-            chain = []
+        chain = result.chain if result.chain else []
 
-        # 在消息链末尾追加图片
+        # 追加图片
         max_images = self.config.get("max_images", 1)
         for img_path in images[:max_images]:
-            chain.append(Image.fromFileSystem(img_path))
-            logger.info(f"[{PLUGIN_NAME}] 追加图片: {img_path}")
+            try:
+                chain.append(Image.fromFileSystem(img_path))
+                logger.info(f"[{PLUGIN_NAME}] 追加图片: {img_path}")
+            except Exception as e:
+                logger.error(f"[{PLUGIN_NAME}] 追加图片失败 {img_path}: {e}")
 
-        # 将修改后的消息链写回结果
+        # 写回
         result.chain = chain
         event.set_result(result)
 
-        # 注意：不要调用 event.stop_event()，让官方管道继续发送消息
+        # 不要调用 event.stop_event()，让官方管道继续发送
 
     # ==================== 聊天指令 ====================
 

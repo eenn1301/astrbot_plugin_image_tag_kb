@@ -1,11 +1,11 @@
 import base64
 import json
+import inspect
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.message_components import Image, Plain
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 
@@ -139,48 +139,85 @@ class ImageTagKBPlugin(Star):
                 results.append(path)
         return results
 
-    # ==================== 消息处理：在官方回复后追加图片 ====================
+    # ==================== 调用官方 LLM 生成回答 ====================
 
-    @filter.on_decorating_result(priority=100)
-    async def on_decorating_result(self, event: AstrMessageEvent):
-        """
-        在官方 LLM 生成回复之后、消息发送之前触发。
-        根据用户原始消息匹配图片，并追加到消息链末尾。
-        """
-        # 获取原始用户消息
+    async def _ask_llm(self, event: AstrMessageEvent, prompt: str) -> Optional[str]:
+        """使用当前会话的官方 LLM 配置生成回答。"""
+        try:
+            get_provider = getattr(self.context, "get_using_provider", None)
+            if not callable(get_provider):
+                logger.warning(f"[{PLUGIN_NAME}] context 没有 get_using_provider")
+                return None
+
+            provider = None
+            try:
+                provider = get_provider(umo=event.unified_msg_origin)
+                if inspect.isawaitable(provider):
+                    provider = await provider
+            except TypeError:
+                provider = get_provider()
+                if inspect.isawaitable(provider):
+                    provider = await provider
+            except Exception:
+                provider = None
+
+            if not provider:
+                logger.warning(f"[{PLUGIN_NAME}] 未能获取当前 LLM provider")
+                return None
+
+            # 调用官方 provider 的 text_chat，传入当前会话 ID 以保留上下文
+            response = await provider.text_chat(
+                prompt=prompt,
+                session_id=event.session_id,
+            )
+
+            # 兼容不同版本的返回结构
+            text = None
+            if hasattr(response, "completion_text"):
+                text = response.completion_text
+            elif isinstance(response, dict):
+                text = response.get("completion_text") or response.get("text")
+            elif isinstance(response, str):
+                text = response
+
+            if text:
+                return str(text).strip()
+            logger.warning(f"[{PLUGIN_NAME}] LLM 返回结构无法解析: {type(response)}")
+            return None
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] 调用官方 LLM 失败: {e}", exc_info=True)
+            return None
+
+    # ==================== 消息处理 ====================
+
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
+    async def on_message(self, event: AstrMessageEvent):
         text = event.message_str.strip()
         if not text:
             return
 
-        # 匹配图片
+        trigger_mode = self.config.get("trigger_mode", "all")
+        if trigger_mode == "command":
+            prefix = self.config.get("command_prefix", "/查")
+            if not text.startswith(prefix):
+                return
+            text = text[len(prefix):].strip()
+
+        # 1. 调用官方 LLM 生成回答
+        answer = await self._ask_llm(event, text)
+
+        # 2. 匹配图片
         images = self._find_images(text)
-        if not images:
-            return
 
-        # 检查是否启用图片发送
-        if not self.config.get("enable_image", True):
-            return
+        # 3. 先发送文字回答
+        if answer and self.config.get("enable_kb", True):
+            yield event.plain_result(answer)
 
-        # 获取当前的消息链
-        result = event.get_result()
-        if result is None:
-            return
-
-        chain = result.chain
-        if chain is None:
-            chain = []
-
-        # 在消息链末尾追加图片
-        max_images = self.config.get("max_images", 1)
-        for img_path in images[:max_images]:
-            chain.append(Image.fromFileSystem(img_path))
-            logger.info(f"[{PLUGIN_NAME}] 追加图片: {img_path}")
-
-        # 将修改后的消息链写回结果
-        result.chain = chain
-        event.set_result(result)
-
-        # 注意：不要调用 event.stop_event()，让官方管道继续发送消息
+        # 4. 再发送图片（在回答末尾）
+        if images and self.config.get("enable_image", True):
+            max_images = self.config.get("max_images", 1)
+            for img_path in images[:max_images]:
+                yield event.image_result(img_path)
 
     # ==================== 聊天指令 ====================
 

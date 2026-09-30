@@ -101,19 +101,16 @@ class ImageTagKBPlugin(Star):
         exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
         stored = self._load_mapping()
 
-        # 当前目录下所有图片文件名
         current_files = {
             p.name
             for p in self.image_dir.iterdir()
             if p.is_file() and p.suffix.lower() in exts
         }
 
-        # 保留仍然存在的文件的标签
         new_mapping: Dict[str, str] = {
             name: tag for name, tag in stored.items() if name in current_files
         }
 
-        # 新文件：用文件名 stem 作为默认标签
         for name in current_files:
             if name not in new_mapping:
                 new_mapping[name] = Path(name).stem.lower()
@@ -326,7 +323,8 @@ class ImageTagKBPlugin(Star):
     async def handle_update_tag(self):
         """修改某个图片的标签。"""
         try:
-            payload = await request.get_json(silent=True)
+            # 使用 request.json() 解析请求体（AstrBot 官方推荐用法）
+            payload = await request.json(default={})
             if not isinstance(payload, dict):
                 payload = {}
 
@@ -364,7 +362,8 @@ class ImageTagKBPlugin(Star):
             if not self.image_dir:
                 return error_response("插件未初始化")
 
-            payload = await request.get_json(silent=True)
+            # 使用 request.json() 解析请求体（AstrBot 官方推荐用法）
+            payload = await request.json(default={})
             if not isinstance(payload, dict):
                 payload = {}
 

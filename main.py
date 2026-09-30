@@ -200,48 +200,23 @@ class ImageTagKBPlugin(Star):
         return str(item)
 
     async def _try_retrieve(self, kb_manager, q: str, kb_name: str, top_k: int):
-        """
-        尝试多种 retrieve 调用方式，兼容不同 AstrBot 版本。
-        返回 (results, 成功调用的描述) 或 (None, 最后一次错误)。
-        """
-        # 候选调用方式，按优先级排列
-        candidates = []
-
-        # 1) retrieve(query=..., kb_names=[...], top_k=...)
-        candidates.append((
-            "query + kb_names + top_k",
-            lambda: kb_manager.retrieve(query=q, kb_names=[kb_name], top_k=top_k),
-        ))
-        # 2) retrieve(query=..., kb_names=[...])
-        candidates.append((
-            "query + kb_names",
-            lambda: kb_manager.retrieve(query=q, kb_names=[kb_name]),
-        ))
-        # 3) retrieve(kb_names=[...], query=...)
-        candidates.append((
-            "kb_names + query",
-            lambda: kb_manager.retrieve(kb_names=[kb_name], query=q),
-        ))
-        # 4) retrieve(query=...)
-        candidates.append((
-            "query only",
-            lambda: kb_manager.retrieve(query=q),
-        ))
-        # 5) retrieve(q)
-        candidates.append((
-            "positional q",
-            lambda: kb_manager.retrieve(q),
-        ))
-        # 6) retrieve(q, [kb_name])
-        candidates.append((
-            "positional q + kb_names",
-            lambda: kb_manager.retrieve(q, [kb_name]),
-        ))
-        # 7) retrieve(q, [kb_name], top_k)
-        candidates.append((
-            "positional q + kb_names + top_k",
-            lambda: kb_manager.retrieve(q, [kb_name], top_k),
-        ))
+        """尝试多种 retrieve 调用方式，兼容不同 AstrBot 版本。"""
+        candidates = [
+            ("query + kb_names + top_k",
+             lambda: kb_manager.retrieve(query=q, kb_names=[kb_name], top_k=top_k)),
+            ("query + kb_names",
+             lambda: kb_manager.retrieve(query=q, kb_names=[kb_name])),
+            ("kb_names + query",
+             lambda: kb_manager.retrieve(kb_names=[kb_name], query=q)),
+            ("query only",
+             lambda: kb_manager.retrieve(query=q)),
+            ("positional q",
+             lambda: kb_manager.retrieve(q)),
+            ("positional q + kb_names",
+             lambda: kb_manager.retrieve(q, [kb_name])),
+            ("positional q + kb_names + top_k",
+             lambda: kb_manager.retrieve(q, [kb_name], top_k)),
+        ]
 
         last_err = None
         for desc, fn in candidates:
@@ -253,7 +228,6 @@ class ImageTagKBPlugin(Star):
                 return result, desc
             except TypeError as e:
                 last_err = e
-                logger.debug(f"[{PLUGIN_NAME}] retrieve 方式 [{desc}] 失败: {e}")
                 continue
             except Exception as e:
                 logger.error(f"[{PLUGIN_NAME}] retrieve 方式 [{desc}] 异常: {e}")
@@ -261,31 +235,37 @@ class ImageTagKBPlugin(Star):
 
         return None, f"所有 retrieve 调用方式均失败，最后一次错误: {last_err}"
 
-    async def _find_knowledge(self, query: str) -> Optional[str]:
+    async def _find_knowledge_docs(self, query: str) -> List[str]:
+        """返回检索到的文本片段列表（已按配置过滤和截断）。"""
         q = query.strip()
         if not q:
-            return None
+            return []
 
         kb_name = self._current_kb_name()
         if not kb_name:
             logger.info(f"[{PLUGIN_NAME}] 未选择知识库，跳过检索")
-            return None
+            return []
 
         kb_manager = getattr(self.context, "kb_manager", None)
         if kb_manager is None:
             logger.error(f"[{PLUGIN_NAME}] context 没有 kb_manager 属性")
-            return None
+            return []
 
-        top_k = int(self.settings.get("kb_top_k") or self.config.get("kb_top_k", 3))
+        # 核心：默认只取 1 条，避免返回一大堆无关内容
+        top_k = int(
+            self.settings.get("kb_top_k")
+            or self.config.get("kb_top_k", 1)
+        )
+        top_k = max(1, min(top_k, 5))  # 硬性限制 1~5
 
         results, desc = await self._try_retrieve(kb_manager, q, kb_name, top_k)
         if results is None:
             logger.warning(f"[{PLUGIN_NAME}] 知识库检索失败: {desc}")
-            return None
+            return []
 
         if not results:
             logger.info(f"[{PLUGIN_NAME}] 知识库「{kb_name}」检索无结果")
-            return None
+            return []
 
         docs = results
         if isinstance(results, dict) and "results" in results:
@@ -298,15 +278,93 @@ class ImageTagKBPlugin(Star):
         except TypeError:
             docs = [docs]
 
+        # 截取前 top_k 条
+        docs = docs[:top_k]
+
         logger.info(
             f"[{PLUGIN_NAME}] 知识库「{kb_name}」检索到 {len(docs)} 条结果"
         )
 
-        texts = [self._extract_text(d) for d in docs]
-        texts = [t for t in texts if t]
-        if not texts:
+        # 单条最大长度（字符数），默认 1000
+        max_chars = int(
+            self.settings.get("kb_max_chars")
+            or self.config.get("kb_max_chars", 1000)
+        )
+
+        texts = []
+        for d in docs:
+            t = self._extract_text(d)
+            if not t:
+                continue
+            if max_chars > 0 and len(t) > max_chars:
+                t = t[:max_chars] + "…"
+            texts.append(t)
+        return texts
+
+    # ==================== LLM 摘要 ====================
+
+    async def _summarize_with_llm(
+        self, event: AstrMessageEvent, question: str, context_text: str
+    ) -> Optional[str]:
+        """用 LLM 基于检索到的上下文生成简洁回答。失败返回 None。"""
+        try:
+            get_provider = getattr(self.context, "get_using_provider", None)
+            if not callable(get_provider):
+                logger.warning(f"[{PLUGIN_NAME}] context 没有 get_using_provider")
+                return None
+
+            # 优先按当前会话取 provider，失败时退化为无参调用
+            provider = None
+            try:
+                provider = get_provider(umo=event.unified_msg_origin)
+                if inspect.isawaitable(provider):
+                    provider = await provider
+            except TypeError:
+                provider = get_provider()
+                if inspect.isawaitable(provider):
+                    provider = await provider
+            except Exception:
+                provider = None
+
+            if not provider:
+                logger.warning(f"[{PLUGIN_NAME}] 未能获取当前 LLM provider")
+                return None
+
+            system_prompt = (
+                "你是一个知识库助手。请根据下方提供的资料，用简洁、"
+                "准确的中文回答用户的问题。只回答与问题直接相关的内容，"
+                "不要复述资料全文，不要编造资料里没有的信息。"
+                "如果资料与问题无关，请说“资料中未找到相关内容”。"
+            )
+            user_prompt = (
+                f"【用户问题】\n{question}\n\n"
+                f"【参考资料】\n{context_text}\n\n"
+                f"请基于参考资料回答用户问题："
+            )
+
+            resp = await provider.text_chat(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                session_id=None,
+            )
+
+            # 兼容不同版本的返回结构
+            text = None
+            if hasattr(resp, "completion_text"):
+                text = resp.completion_text
+            elif isinstance(resp, dict):
+                text = resp.get("completion_text") or resp.get("text")
+            elif isinstance(resp, str):
+                text = resp
+
+            if text:
+                logger.info(f"[{PLUGIN_NAME}] LLM 摘要成功，长度: {len(text)}")
+                return str(text).strip()
+            logger.warning(f"[{PLUGIN_NAME}] LLM 返回结构无法解析: {type(resp)}")
             return None
-        return "\n\n".join(texts)
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] LLM 摘要失败: {e}", exc_info=True)
+            return None
 
     # ==================== 消息处理 ====================
 
@@ -323,8 +381,29 @@ class ImageTagKBPlugin(Star):
                 return
             text = text[len(prefix):].strip()
 
-        explanation = await self._find_knowledge(text)
+        docs = await self._find_knowledge_docs(text)
         images = self._find_images(text)
+
+        explanation: Optional[str] = None
+        if docs:
+            context_text = "\n\n---\n\n".join(docs)
+
+            use_llm = self.settings.get(
+                "use_llm_summary",
+                self.config.get("use_llm_summary", True),
+            )
+            if use_llm:
+                explanation = await self._summarize_with_llm(
+                    event, text, context_text
+                )
+                if not explanation:
+                    logger.info(
+                        f"[{PLUGIN_NAME}] LLM 摘要失败，退化为只取前 1 条原文"
+                    )
+                    explanation = docs[0]
+            else:
+                # 不使用 LLM 时，直接输出最相关的那条
+                explanation = docs[0]
 
         logger.info(
             f"[{PLUGIN_NAME}] 检索 | 消息: {text!r} | "

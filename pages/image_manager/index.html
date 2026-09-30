@@ -9,6 +9,20 @@
   <h2>图片标签管理</h2>
   <p class="hint">标签默认取文件名，可点击「改标签」手动修改，修改后会被保存。</p>
 
+  <!-- 知识库选择 -->
+  <section class="section">
+    <div class="section-header">
+      <h3>当前知识库</h3>
+      <button class="btn" id="reloadKbBtn">重新扫描</button>
+    </div>
+    <div class="kb-picker">
+      <select id="kbSelect">
+        <option value="">（不使用知识库）</option>
+      </select>
+      <span class="kb-status" id="kbStatus">加载中…</span>
+    </div>
+  </section>
+
   <section class="section">
     <div class="section-header">
       <h3>上传图片</h3>
@@ -38,7 +52,6 @@
     </div>
   </section>
 
-  <!-- 自定义弹窗（替代原生 confirm/prompt） -->
   <div class="modal-mask" id="modalMask">
     <div class="modal-box">
       <h4 id="modalTitle">标题</h4>

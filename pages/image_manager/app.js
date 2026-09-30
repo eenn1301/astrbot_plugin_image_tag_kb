@@ -9,7 +9,10 @@ const imageCount = document.getElementById('imageCount');
 const refreshBtn = document.getElementById('refreshBtn');
 const toast = document.getElementById('toast');
 
-// 自定义弹窗元素
+const kbSelect = document.getElementById('kbSelect');
+const kbStatus = document.getElementById('kbStatus');
+const reloadKbBtn = document.getElementById('reloadKbBtn');
+
 const modalMask = document.getElementById('modalMask');
 const modalTitle = document.getElementById('modalTitle');
 const modalMsg = document.getElementById('modalMsg');
@@ -28,14 +31,6 @@ function setStatus(el, text, isError = false) {
   el.innerHTML = `<p class="status${isError ? ' error' : ''}">${text}</p>`;
 }
 
-/**
- * 自定义弹窗。options:
- *   title: 标题
- *   message: 描述文本
- *   defaultValue: 输入框默认值（若为 null 则不显示输入框）
- *   inputPlaceholder: 输入框占位
- * 返回：字符串（输入框内容）或 true（确认）或 null（取消）
- */
 function openModal({ title, message = '', defaultValue = null, inputPlaceholder = '' }) {
   return new Promise(resolve => {
     modalTitle.textContent = title;
@@ -65,22 +60,13 @@ function openModal({ title, message = '', defaultValue = null, inputPlaceholder 
       modalMask.removeEventListener('click', onMask);
       modalInput.removeEventListener('keydown', onKey);
     };
-
     const onOk = () => {
       const val = defaultValue === null ? true : modalInput.value;
       cleanup();
       resolve(val);
     };
-
-    const onCancel = () => {
-      cleanup();
-      resolve(null);
-    };
-
-    const onMask = (e) => {
-      if (e.target === modalMask) onCancel();
-    };
-
+    const onCancel = () => { cleanup(); resolve(null); };
+    const onMask = (e) => { if (e.target === modalMask) onCancel(); };
     const onKey = (e) => {
       if (e.key === 'Enter') onOk();
       if (e.key === 'Escape') onCancel();
@@ -95,7 +81,63 @@ function openModal({ title, message = '', defaultValue = null, inputPlaceholder 
   });
 }
 
-// ==================== 加载图片列表 ====================
+// ==================== 知识库选择 ====================
+async function refreshKbs() {
+  kbStatus.textContent = '加载中…';
+  try {
+    const data = await bridge.apiGet('kbs');
+    console.log('[image_tag_kb] kbs 返回:', data);
+    const kbs = data.kbs || [];
+    const current = data.current || '';
+
+    kbSelect.innerHTML = '<option value="">（不使用知识库）</option>'
+      + kbs.map(k => `<option value="${escapeHtml(k)}"${k === current ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('');
+
+    if (kbs.length === 0) {
+      kbStatus.textContent = '未检测到知识库，请先在 AstrBot 知识库页面创建。';
+      kbStatus.className = 'kb-status warn';
+    } else if (current) {
+      kbStatus.textContent = `已选择：${current}`;
+      kbStatus.className = 'kb-status ok';
+    } else {
+      kbStatus.textContent = '尚未选择知识库';
+      kbStatus.className = 'kb-status';
+    }
+  } catch (e) {
+    console.error('[image_tag_kb] 加载知识库失败:', e);
+    kbStatus.textContent = '加载知识库列表失败：' + (e.message || e);
+    kbStatus.className = 'kb-status warn';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+kbSelect.addEventListener('change', async () => {
+  const val = kbSelect.value;
+  try {
+    await bridge.apiPost('set_kb', { kb_name: val });
+    if (val) {
+      showToast(`已选择知识库：${val}`);
+      kbStatus.textContent = `已选择：${val}`;
+      kbStatus.className = 'kb-status ok';
+    } else {
+      showToast('已取消知识库');
+      kbStatus.textContent = '尚未选择知识库';
+      kbStatus.className = 'kb-status';
+    }
+  } catch (e) {
+    console.error('[image_tag_kb] 设置知识库失败:', e);
+    showToast('保存失败: ' + (e.message || e), true);
+  }
+});
+
+reloadKbBtn.addEventListener('click', refreshKbs);
+
+// ==================== 图片列表 ====================
 async function refreshList() {
   setStatus(imageGrid, '加载中…');
   imageCount.textContent = '';
@@ -139,7 +181,6 @@ async function refreshList() {
       const actions = document.createElement('div');
       actions.className = 'card-actions';
 
-      // ---- 改标签按钮 ----
       const editBtn = document.createElement('button');
       editBtn.className = 'edit-btn';
       editBtn.textContent = '改标签';
@@ -151,32 +192,25 @@ async function refreshList() {
           defaultValue: currentTag,
           inputPlaceholder: '输入新标签',
         });
-        if (newTag === null) return;           // 取消
+        if (newTag === null) return;
         const trimmed = String(newTag).trim();
         if (!trimmed) { showToast('标签不能为空', true); return; }
         if (trimmed === currentTag) return;
 
         try {
-          console.log('[image_tag_kb] → update_tag', item.name, '->', trimmed);
           const res = await bridge.apiPost('update_tag', {
             filename: item.name,
             tag: trimmed,
           });
-          console.log('[image_tag_kb] ← update_tag 返回:', res);
-          if (res && res.error) {
-            showToast(res.error, true);
-            return;
-          }
+          if (res && res.error) { showToast(res.error, true); return; }
           showToast(`标签已更新为「${trimmed}」`);
           await refreshList();
           await refreshTags();
         } catch (e) {
-          console.error('[image_tag_kb] 改标签失败:', e);
           showToast('修改失败: ' + (e.message || e), true);
         }
       });
 
-      // ---- 删除按钮 ----
       const delBtn = document.createElement('button');
       delBtn.className = 'del-btn';
       delBtn.textContent = '删除';
@@ -186,20 +220,13 @@ async function refreshList() {
           message: `确定删除「${item.name}」？此操作不可恢复。`,
         });
         if (ok === null) return;
-
         try {
-          console.log('[image_tag_kb] → delete', item.name);
           const res = await bridge.apiPost('delete', { filename: item.name });
-          console.log('[image_tag_kb] ← delete 返回:', res);
-          if (res && res.error) {
-            showToast(res.error, true);
-            return;
-          }
+          if (res && res.error) { showToast(res.error, true); return; }
           showToast(`已删除 ${item.name}`);
           await refreshList();
           await refreshTags();
         } catch (e) {
-          console.error('[image_tag_kb] 删除失败:', e);
           showToast('删除失败: ' + (e.message || e), true);
         }
       });
@@ -219,7 +246,7 @@ async function refreshList() {
   }
 }
 
-// ==================== 加载标签 ====================
+// ==================== 标签统计 ====================
 async function refreshTags() {
   setStatus(tagStats, '加载中…');
   tagCount.textContent = '';
@@ -233,7 +260,6 @@ async function refreshTags() {
       setStatus(tagStats, '暂无标签，请先上传图片。');
       return;
     }
-
     tagStats.innerHTML = tags
       .map(t => `<span class="tag-chip" title="${t.filename}">${t.tag}</span>`)
       .join('');
@@ -246,7 +272,6 @@ async function refreshTags() {
 // ==================== 上传逻辑 ====================
 function bindUpload() {
   drop.addEventListener('click', () => fileInput.click());
-
   drop.addEventListener('dragover', e => {
     e.preventDefault();
     drop.classList.add('over');
@@ -257,7 +282,6 @@ function bindUpload() {
     drop.classList.remove('over');
     await uploadFiles(e.dataTransfer.files);
   });
-
   fileInput.addEventListener('change', async e => {
     await uploadFiles(e.target.files);
   });
@@ -265,10 +289,7 @@ function bindUpload() {
 
 async function uploadFiles(files) {
   const images = Array.from(files).filter(f => f.type.startsWith('image/'));
-  if (images.length === 0) {
-    showToast('没有检测到图片文件', true);
-    return;
-  }
+  if (images.length === 0) { showToast('没有检测到图片文件', true); return; }
 
   const total = images.length;
   let ok = 0, fail = 0;
@@ -288,13 +309,9 @@ async function uploadFiles(files) {
   fileInput.value = '';
   textEl.textContent = '点击或拖拽图片到此处上传';
 
-  if (fail === 0) {
-    showToast(`上传完成 ${ok}/${total}`);
-  } else if (ok === 0) {
-    showToast(`全部上传失败 (${fail})`, true);
-  } else {
-    showToast(`成功 ${ok}，失败 ${fail}`, true);
-  }
+  if (fail === 0) showToast(`上传完成 ${ok}/${total}`);
+  else if (ok === 0) showToast(`全部上传失败 (${fail})`, true);
+  else showToast(`成功 ${ok}，失败 ${fail}`, true);
 
   await refreshList();
   await refreshTags();
@@ -317,6 +334,7 @@ async function uploadFiles(files) {
     refreshTags();
   });
 
+  await refreshKbs();
   await refreshList();
   await refreshTags();
 })();

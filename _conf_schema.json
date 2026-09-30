@@ -1,0 +1,47 @@
+{
+  "image_dir": {
+    "description": "图片存放目录（绝对路径或相对于插件目录）",
+    "type": "string",
+    "default": "data/images"
+  },
+  "kb_name": {
+    "description": "AstrBot 知识库名称（在面板知识库页面创建）",
+    "type": "string",
+    "default": ""
+  },
+  "kb_top_k": {
+    "description": "知识库检索返回的文档片段数量",
+    "type": "int",
+    "default": 3
+  },
+  "trigger_mode": {
+    "description": "触发模式：all（所有消息）或 command（需指令前缀）",
+    "type": "string",
+    "default": "all"
+  },
+  "command_prefix": {
+    "description": "指令模式下的前缀",
+    "type": "string",
+    "default": "/查"
+  },
+  "tag_separators": {
+    "description": "文件名中的标签分隔符列表",
+    "type": "list",
+    "default": ["_", "-", " "]
+  },
+  "enable_kb": {
+    "description": "是否启用知识库回答",
+    "type": "bool",
+    "default": true
+  },
+  "enable_image": {
+    "description": "是否发送匹配的图片",
+    "type": "bool",
+    "default": true
+  },
+  "max_images": {
+    "description": "最多发送几张图片",
+    "type": "int",
+    "default": 1
+  }
+}

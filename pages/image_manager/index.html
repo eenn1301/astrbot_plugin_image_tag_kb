@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>图片标签管理</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <h2>图片标签管理</h2>
+  <p class="hint">文件名即标签，例如「占卜家魔药.jpg」→ 标签：占卜家魔药</p>
+
+  <div class="drop" id="drop">
+    <p>点击或拖拽图片到此处上传</p>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden />
+  </div>
+
+  <ul id="fileList"></ul>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

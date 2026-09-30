@@ -1,0 +1,43 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 720px;
+  margin: 24px auto;
+  padding: 0 16px;
+  color: #333;
+}
+h2 { font-size: 20px; margin-bottom: 4px; }
+.hint { font-size: 13px; color: #888; margin-top: 0; }
+
+.drop {
+  border: 2px dashed #bbb;
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  cursor: pointer;
+  transition: .2s;
+  background: #fafafa;
+}
+.drop:hover, .drop.over {
+  border-color: #4a90e2;
+  background: #eef5ff;
+}
+
+ul { list-style: none; padding: 0; margin-top: 20px; }
+li {
+  padding: 8px 12px;
+  background: #f4f4f4;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+button.del {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  background: #d33;
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}

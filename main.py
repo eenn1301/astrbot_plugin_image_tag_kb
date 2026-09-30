@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 from pathlib import Path
@@ -26,8 +27,6 @@ class ImageTagKBPlugin(Star):
         self.tag_to_image: Dict[str, str] = {}
         self.image_dir: Optional[Path] = None
         self.mapping_file: Optional[Path] = None
-        # 防止同一会话短时间内重复发图
-        self._sent_keys: set = set()
 
         self._load_config()
 
@@ -142,15 +141,15 @@ class ImageTagKBPlugin(Star):
                 results.append(path)
         return results
 
-    # ==================== LLM 响应后追加图片 ====================
+    # ==================== 主消息钩子（一定触发） ====================
 
-    @filter.on_llm_response()
-    async def _hook_on_llm_response(self, event: AstrMessageEvent, resp):
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_message(self, event: AstrMessageEvent):
         """
-        LLM 响应生成后触发。在流式输出下仍然会触发。
-        直接通过 context.send_message 发送图片作为独立消息。
+        这个消息钩子在消息进入管道时触发，不受流式输出影响。
+        匹配到图片时，创建一个延迟任务，等官方 LLM 先回复后再补发图片。
         """
-        logger.info(f"[{PLUGIN_NAME}] on_llm_response 被触发")
+        logger.info(f"[{PLUGIN_NAME}] on_message 被触发")
 
         if not self.config.get("enable_image", True):
             return
@@ -161,27 +160,41 @@ class ImageTagKBPlugin(Star):
 
         images = self._find_images(text)
         if not images:
-            logger.info(f"[{PLUGIN_NAME}] on_llm_response: 无匹配图片")
+            logger.info(f"[{PLUGIN_NAME}] on_message: 无匹配图片")
             return
 
         max_images = self.config.get("max_images", 1)
         selected = images[:max_images]
+        delay = float(self.config.get("image_delay_seconds", 3.0))
 
         logger.info(
-            f"[{PLUGIN_NAME}] on_llm_response: 命中 {len(selected)} 张图片，准备发送"
+            f"[{PLUGIN_NAME}] on_message: 命中 {len(selected)} 张图片，"
+            f"{delay}s 后发送"
         )
 
-        for img_path in selected:
-            try:
-                logger.info(f"[{PLUGIN_NAME}] 发送图片: {img_path}")
-                chain = MessageChain([Image.fromFileSystem(img_path)])
-                await self.context.send_message(
-                    event.unified_msg_origin, chain
-                )
-            except Exception as e:
-                logger.error(
-                    f"[{PLUGIN_NAME}] 发送图片失败 {img_path}: {e}", exc_info=True
-                )
+        # 创建延迟任务，让官方 LLM 先回复
+        asyncio.create_task(
+            self._send_images_later(event.unified_msg_origin, selected, delay)
+        )
+
+    async def _send_images_later(self, umo: str, images: List[str], delay: float):
+        """延迟发送图片，让官方 LLM 先输出文字。"""
+        try:
+            await asyncio.sleep(delay)
+            for img_path in images:
+                try:
+                    logger.info(f"[{PLUGIN_NAME}] 发送图片: {img_path}")
+                    chain = MessageChain([Image.fromFileSystem(img_path)])
+                    await self.context.send_message(umo, chain)
+                except Exception as e:
+                    logger.error(
+                        f"[{PLUGIN_NAME}] 发送图片失败 {img_path}: {e}",
+                        exc_info=True,
+                    )
+        except asyncio.CancelledError:
+            logger.info(f"[{PLUGIN_NAME}] 图片发送任务被取消")
+        except Exception as e:
+            logger.error(f"[{PLUGIN_NAME}] 延迟发送任务异常: {e}", exc_info=True)
 
     # ==================== 聊天指令 ====================
 

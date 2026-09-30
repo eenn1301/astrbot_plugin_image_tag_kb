@@ -5,7 +5,6 @@ from typing import Dict, List, Optional
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.message_components import Image
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 
@@ -26,6 +25,8 @@ class ImageTagKBPlugin(Star):
         self.tag_to_image: Dict[str, str] = {}
         self.image_dir: Optional[Path] = None
         self.mapping_file: Optional[Path] = None
+        # 记录已经发送过图片的会话，避免重复追加
+        self._sent_sessions: set = set()
 
         self._load_config()
 
@@ -139,48 +140,38 @@ class ImageTagKBPlugin(Star):
                 results.append(path)
         return results
 
-    # ==================== 在官方回复后追加图片 ====================
+    # ==================== 官方消息发送后追加图片 ====================
 
-    @filter.on_decorating_result(priority=100)
-    async def on_decorating_result(self, event: AstrMessageEvent):
+    @filter.after_message_sent()
+    async def after_message_sent(self, event: AstrMessageEvent):
         """
-        官方管道生成回复后触发。根据用户原始消息匹配图片，追加到消息链末尾。
+        官方消息已发送后触发。根据用户原始消息匹配图片，作为新消息追加发送。
+        不受流式输出影响。
         """
-        # 只在启用时处理
         if not self.config.get("enable_image", True):
             return
 
-        # 用户原始消息
         text = event.message_str.strip()
         if not text:
             return
 
-        # 匹配图片
         images = self._find_images(text)
         if not images:
             return
 
-        # 拿到官方即将发送的结果
-        result = event.get_result()
-        if result is None:
-            return
-
-        chain = result.chain if result.chain else []
-
-        # 追加图片
         max_images = self.config.get("max_images", 1)
-        for img_path in images[:max_images]:
+        selected = images[:max_images]
+
+        logger.info(
+            f"[{PLUGIN_NAME}] after_message_sent 命中，准备追加 {len(selected)} 张图片"
+        )
+
+        for img_path in selected:
             try:
-                chain.append(Image.fromFileSystem(img_path))
-                logger.info(f"[{PLUGIN_NAME}] 追加图片: {img_path}")
+                logger.info(f"[{PLUGIN_NAME}] 发送图片: {img_path}")
+                yield event.image_result(img_path)
             except Exception as e:
-                logger.error(f"[{PLUGIN_NAME}] 追加图片失败 {img_path}: {e}")
-
-        # 写回
-        result.chain = chain
-        event.set_result(result)
-
-        # 不要调用 event.stop_event()，让官方管道继续发送
+                logger.error(f"[{PLUGIN_NAME}] 发送图片失败 {img_path}: {e}")
 
     # ==================== 聊天指令 ====================
 

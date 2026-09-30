@@ -4,27 +4,6 @@
     "type": "string",
     "default": "data/images"
   },
-  "kb_name": {
-    "description": "（已被插件页面上的「知识库选择」取代，此处可忽略）",
-    "type": "string",
-    "default": "",
-    "invisible": true
-  },
-  "kb_top_k": {
-    "description": "知识库检索返回的文档片段数量（建议 1，避免回答过长）",
-    "type": "int",
-    "default": 1
-  },
-  "kb_max_chars": {
-    "description": "单条知识库文本最大字符数，超出部分会被截断（0 表示不限制）",
-    "type": "int",
-    "default": 1000
-  },
-  "use_llm_summary": {
-    "description": "是否用 LLM 基于知识库内容生成简洁回答（关闭则直接输出最相关的一条原文）",
-    "type": "bool",
-    "default": true
-  },
   "trigger_mode": {
     "description": "触发模式：all（所有消息）或 command（需指令前缀）",
     "type": "string",
@@ -35,14 +14,8 @@
     "type": "string",
     "default": "/查"
   },
-  "tag_separators": {
-    "description": "（一对一模式下已不生效）",
-    "type": "list",
-    "default": ["_", "-", " "],
-    "invisible": true
-  },
   "enable_kb": {
-    "description": "是否启用知识库回答",
+    "description": "是否发送官方 LLM 的回答",
     "type": "bool",
     "default": true
   },

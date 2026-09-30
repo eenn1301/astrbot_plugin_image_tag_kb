@@ -7,9 +7,8 @@
 </head>
 <body>
   <h2>图片标签管理</h2>
-  <p class="hint">文件名即标签，例如「占卜家魔药.jpg」→ 标签：占卜家魔药</p>
+  <p class="hint">标签默认取文件名，可点击「改标签」手动修改，修改后会被保存。</p>
 
-  <!-- 上传区 -->
   <section class="section">
     <div class="section-header">
       <h3>上传图片</h3>
@@ -20,7 +19,6 @@
     </div>
   </section>
 
-  <!-- 标签区 -->
   <section class="section">
     <div class="section-header">
       <h3>标签统计 <span class="count" id="tagCount"></span></h3>
@@ -31,7 +29,6 @@
     </div>
   </section>
 
-  <!-- 图片列表区 -->
   <section class="section">
     <div class="section-header">
       <h3>图片列表 <span class="count" id="imageCount"></span></h3>
@@ -41,7 +38,6 @@
     </div>
   </section>
 
-  <!-- 全局提示 -->
   <div class="toast" id="toast"></div>
 
   <script type="module" src="./app.js"></script>

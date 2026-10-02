@@ -10,24 +10,20 @@ from astrbot.api.message_components import Image
 from astrbot.api.star import Context, Star
 from astrbot.api.web import error_response, json_response, request
 
-
 PLUGIN_NAME = "astrbot_plugin_image_tag_kb"
 
 
 class ImageTagKBPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig = None):
         super().__init__(context)
-
         if config:
             self.config = config
         else:
             self.config = {}
-
         self.image_tags: Dict[str, str] = {}
         self.tag_to_image: Dict[str, str] = {}
         self.image_dir: Optional[Path] = None
         self.mapping_file: Optional[Path] = None
-
         self._load_config()
 
         context.register_web_api(
@@ -51,7 +47,6 @@ class ImageTagKBPlugin(Star):
         logger.info(f"[{PLUGIN_NAME}] Web API 已注册")
 
     # ==================== 生命周期 ====================
-
     async def initialize(self):
         self._scan_images()
         logger.info(f"[{PLUGIN_NAME}] 已就绪 | 图片目录: {self.image_dir}")
@@ -72,7 +67,6 @@ class ImageTagKBPlugin(Star):
         self.mapping_file = data_dir / "mapping.json"
 
     # ==================== mapping.json ====================
-
     def _load_mapping(self) -> Dict[str, str]:
         if not self.mapping_file or not self.mapping_file.exists():
             return {}
@@ -95,7 +89,6 @@ class ImageTagKBPlugin(Star):
             logger.error(f"保存 mapping.json 失败: {e}")
 
     # ==================== 扫描与索引 ====================
-
     def _scan_images(self):
         if not self.image_dir or not self.image_dir.exists():
             self.image_tags = {}
@@ -104,7 +97,6 @@ class ImageTagKBPlugin(Star):
 
         exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
         stored = self._load_mapping()
-
         current_files = {
             p.name
             for p in self.image_dir.iterdir()
@@ -114,7 +106,6 @@ class ImageTagKBPlugin(Star):
         new_mapping: Dict[str, str] = {
             name: tag for name, tag in stored.items() if name in current_files
         }
-
         for name in current_files:
             if name not in new_mapping:
                 new_mapping[name] = Path(name).stem.lower()
@@ -142,7 +133,6 @@ class ImageTagKBPlugin(Star):
         return results
 
     # ==================== 主消息钩子（一定触发） ====================
-
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
         """
@@ -153,6 +143,15 @@ class ImageTagKBPlugin(Star):
 
         if not self.config.get("enable_image", True):
             return
+
+        # ---- 触发模式判断 ----
+        if self.config.get("trigger_mode", "always") == "at_only":
+            if not event.is_at_or_wake_command:
+                logger.info(
+                    f"[{PLUGIN_NAME}] trigger_mode=at_only，未 @ 机器人，跳过"
+                )
+                return
+        # ----------------------
 
         text = event.message_str.strip()
         if not text:
@@ -166,7 +165,6 @@ class ImageTagKBPlugin(Star):
         max_images = self.config.get("max_images", 1)
         selected = images[:max_images]
         delay = float(self.config.get("image_delay_seconds", 3.0))
-
         logger.info(
             f"[{PLUGIN_NAME}] on_message: 命中 {len(selected)} 张图片，"
             f"{delay}s 后发送"
@@ -197,7 +195,6 @@ class ImageTagKBPlugin(Star):
             logger.error(f"[{PLUGIN_NAME}] 延迟发送任务异常: {e}", exc_info=True)
 
     # ==================== 聊天指令 ====================
-
     @filter.command("重建标签")
     async def cmd_rebuild(self, event: AstrMessageEvent):
         self._scan_images()
@@ -244,28 +241,23 @@ class ImageTagKBPlugin(Star):
         yield event.plain_result(msg)
 
     # ==================== Web API ====================
-
     async def handle_upload(self):
         try:
             if not self.image_dir:
                 return error_response("插件未初始化")
-
             files = await request.files()
             uploaded = files.get("file")
             if not uploaded:
                 return error_response("未收到文件")
-
             filename = uploaded.filename
             safe_name = Path(filename).name
             exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
             if Path(safe_name).suffix.lower() not in exts:
                 return error_response("不支持的文件类型")
-
             target = self.image_dir / safe_name
             content = await uploaded.read()
             with open(target, "wb") as f:
                 f.write(content)
-
             self._scan_images()
             logger.info(f"[{PLUGIN_NAME}] 上传成功: {safe_name}")
             return json_response({"saved": safe_name})
@@ -277,7 +269,6 @@ class ImageTagKBPlugin(Star):
         try:
             if not self.image_dir or not self.image_dir.exists():
                 return json_response({"files": []})
-
             files = sorted(
                 p.name for p in self.image_dir.iterdir() if p.is_file()
             )
@@ -293,16 +284,18 @@ class ImageTagKBPlugin(Star):
                         b64 = base64.b64encode(raw).decode("utf-8")
                         ext = file_path.suffix.lower()
                         mime = {
-                            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                            ".png": "image/png", ".gif": "image/gif",
-                            ".bmp": "image/bmp", ".webp": "image/webp",
+                            ".jpg": "image/jpeg",
+                            ".jpeg": "image/jpeg",
+                            ".png": "image/png",
+                            ".gif": "image/gif",
+                            ".bmp": "image/bmp",
+                            ".webp": "image/webp",
                         }.get(ext, "image/jpeg")
                         thumb = f"data:{mime};base64,{b64}"
                     result.append({"name": name, "thumb": thumb, "tag": tag})
                 except Exception as e:
                     logger.error(f"读取图片失败 {name}: {e}")
                     result.append({"name": name, "thumb": None, "tag": tag})
-
             return json_response({"files": result})
         except Exception as e:
             logger.error(f"[{PLUGIN_NAME}] handle_list 失败: {e}")
@@ -325,25 +318,20 @@ class ImageTagKBPlugin(Star):
             payload = await request.json(default={})
             if not isinstance(payload, dict):
                 payload = {}
-
             filename = str(payload.get("filename", "")).strip()
             new_tag = str(payload.get("tag", "")).strip().lower()
-
             if not filename:
                 return error_response("缺少文件名参数")
             if not new_tag:
                 return error_response("标签不能为空")
-
             safe_name = Path(filename).name
             if safe_name not in self.image_tags:
                 return error_response("图片不存在")
-
             for other_file, other_tag in self.image_tags.items():
                 if other_file != safe_name and other_tag == new_tag:
                     return error_response(
                         f"标签「{new_tag}」已被 {other_file} 使用"
                     )
-
             self.image_tags[safe_name] = new_tag
             self._rebuild_tag_index()
             self._save_mapping()
@@ -357,20 +345,16 @@ class ImageTagKBPlugin(Star):
         try:
             if not self.image_dir:
                 return error_response("插件未初始化")
-
             payload = await request.json(default={})
             if not isinstance(payload, dict):
                 payload = {}
-
             filename = payload.get("filename", "")
             if not filename:
                 return error_response("缺少文件名参数")
-
             safe_name = Path(filename).name
             target = self.image_dir / safe_name
             if not target.exists():
                 return error_response("文件不存在")
-
             target.unlink()
             self.image_tags.pop(safe_name, None)
             self._rebuild_tag_index()

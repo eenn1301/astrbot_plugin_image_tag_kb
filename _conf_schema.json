@@ -9,6 +9,14 @@
     "type": "bool",
     "default": true
   },
+  "trigger_mode": {
+    "description": "图片触发方式",
+    "type": "string",
+    "options": ["always", "at_only"],
+    "labels": ["一直发送", "仅 @ 机器人时发送"],
+    "default": "always",
+    "hint": "选择「一直发送」时，有人聊到标签就发图；选择「仅 @ 机器人时发送」时，只有 @ 机器人且聊到标签才发图。"
+  },
   "max_images": {
     "description": "最多发送几张图片",
     "type": "int",
